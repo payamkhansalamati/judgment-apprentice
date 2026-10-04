@@ -1,5 +1,7 @@
 # Judgment Apprentice
 
+**[Open the live demo](https://judgment-apprentice.onrender.com)** · [Live demo folder](live%20demo/README.md)
+
 An expert’s checklist tells a newcomer what to inspect. Judgment Apprentice captures why the expert stops, what evidence matters, and when a decision needs escalation.
 
 The application follows a fictional software-release review from expert explanation to learner assessment. It combines a React workspace, a FastAPI backend, SQLite persistence, and a checkpointed LangGraph workflow. The complete simulated workflow runs without API keys.
