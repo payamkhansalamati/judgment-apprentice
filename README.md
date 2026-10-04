@@ -16,6 +16,10 @@ The application follows a fictional software-release review from expert explanat
 
 Expert confirmation governs policy. Model observations and generated proposals do not independently approve a rule or save a review decision. Simulated answers, browser speech, and live provider interactions are labeled separately.
 
+## Public hackathon demo on Render
+
+Use the [single-service Render deployment](docs/RENDER.md). `Dockerfile.render` builds React and serves it through FastAPI on the same public origin. Public mode enables only the simulated journey, blocks live providers and real uploads, and isolates visitor sessions. Demo data may reset when the hosting service restarts.
+
 ## Quick start with Docker
 
 Requires Docker Engine or Docker Desktop and Docker Compose **2.24 or later**.
@@ -128,6 +132,6 @@ compose.yaml        Localhost container deployment
 
 This is a single-user prototype with fictional policies and a small supported rule vocabulary. The explanation rubric is a deterministic English heuristic. Passing a case does not establish mastery or certification. Automatic question timing cannot observe activity outside this application.
 
-There is no user authentication, tenant isolation, or public-hosted service boundary. Keep the app on localhost, or access a private host through an authenticated SSH tunnel. Public source availability does not make the running service suitable for anonymous internet access. Keep one backend worker while the workflow uses its process-local mutation lock.
+The default local/live mode has no user authentication or tenant isolation; keep it on localhost or a private SSH tunnel. The Render public-demo mode checks visitor ownership and disables provider/capture endpoints, but remains a temporary synthetic demo rather than a production identity system. Keep one backend worker while the workflow uses its process-local mutation lock.
 
 Capture is opt-in. Off-record stops new capture and audio while preserving earlier evidence. Session deletion removes local artifacts; it cannot remove provider-side copies or external backups. See [limitations and privacy](docs/LIMITATIONS.md), [architecture](docs/ARCHITECTURE.md), and the [release review](docs/AUDIT.md).

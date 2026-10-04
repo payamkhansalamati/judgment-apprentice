@@ -1,7 +1,6 @@
 .git
 .env
 .env.*
-!.env.example
 .venv
 **/__pycache__
 .pytest_cache
@@ -24,3 +23,9 @@ demo
 **/*.wav
 **/*.pem
 **/*.key
+
+**/*.sqlite
+**/*.sqlite-*
+**/*.db
+**/*.m4a
+**/*.ogg

@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 test("expert correction, confirmation, challenge approval, blocked learner save and correction", async ({
   page,
-  request,
 }) => {
   test.setTimeout(90000);
   await page.goto("/");
@@ -134,13 +133,16 @@ test("expert correction, confirmation, challenge approval, blocked learner save 
   await page.reload();
   await page.getByRole("button", { name: "Results", exact: true }).click();
   await expect(page.getByText("hinted", { exact: true })).toBeVisible();
-  await request.delete(`/api/sessions/${sessionId}`);
+  await page.request.delete(`/api/sessions/${sessionId}`);
 });
 
 test("live mode gives explicit setup guidance and never presents demo answers", async ({
   page,
-  request,
 }) => {
+  test.skip(
+    process.env.JA_E2E_PUBLIC_DEMO === "true",
+    "Live mode is disabled in public demo.",
+  );
   await page.goto("/");
   await page
     .getByRole("button", { name: "Start live session", exact: true })
@@ -154,5 +156,5 @@ test("live mode gives explicit setup guidance and never presents demo answers", 
   const sessionId = await page.evaluate(() =>
     localStorage.getItem("ja-session"),
   );
-  await request.delete(`/api/sessions/${sessionId}`);
+  await page.request.delete(`/api/sessions/${sessionId}`);
 });

@@ -12,12 +12,14 @@ import { Timeline } from "./Timeline";
 import { Button } from "./ui/button";
 
 export function ExpertWorkspace({
+  publicDemo = false,
   session,
   onSession,
   onError,
   onEvidence,
   onDebrief,
 }: {
+  publicDemo?: boolean;
   session: Session;
   onSession: (value: Session) => void;
   onError: (message: string) => void;
@@ -54,7 +56,7 @@ export function ExpertWorkspace({
     session.cases.find((c) => c.id === caseId) ?? session.cases[0];
   const capture = useScreenCapture({
     sessionId: session.id,
-    enabled: session.consent && !session.off_record && !paused,
+    enabled: !publicDemo && session.consent && !session.off_record && !paused,
     masks: maskEnabled ? [{ x: 0, y: 0, width: 1, height: maskHeight }] : [],
     onObservation: () => undefined,
     onError,
@@ -463,81 +465,85 @@ export function ExpertWorkspace({
               Save review decision
             </Button>
           </section>
-          <section className="card capture-panel">
-            <div className="row spread">
-              <div>
-                <h3>Screen observation</h3>
-                <p className="muted">
+          {!publicDemo && (
+            <section className="card capture-panel">
+              <div className="row spread">
+                <div>
+                  <h3>Screen observation</h3>
+                  <p className="muted">
+                    {capture.active
+                      ? "● Screen sharing active"
+                      : "Screen sharing stopped"}
+                    .{" "}
+                    {session.mode === "simulated"
+                      ? "Frames are stored locally; visual observations are simulated."
+                      : "Live vision uses selected, masked frames."}
+                  </p>
+                </div>
+                <span className="badge neutral">
                   {capture.active
-                    ? "● Screen sharing active"
-                    : "Screen sharing stopped"}
-                  .{" "}
-                  {session.mode === "simulated"
-                    ? "Frames are stored locally; visual observations are simulated."
-                    : "Live vision uses selected, masked frames."}
-                </p>
+                    ? "Recording selected screen"
+                    : "Not capturing"}
+                </span>
               </div>
-              <span className="badge neutral">
-                {capture.active ? "Recording selected screen" : "Not capturing"}
-              </span>
-            </div>
-            <div className="row wrap">
-              <Button
-                variant="secondary"
-                disabled={
-                  !session.consent ||
-                  session.off_record ||
-                  paused ||
-                  capture.connecting
-                }
-                onClick={() => void capture.start()}
-              >
-                <MonitorUp size={16} />
-                {capture.connecting
-                  ? "Choosing screen…"
-                  : "Share selected screen"}
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={!capture.active}
-                onClick={() => {
-                  cancelQuestions();
-                  setAutomatic(false);
-                  capture.stop();
-                }}
-              >
-                Stop sharing
-              </Button>
-            </div>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={maskEnabled}
-                onChange={(e) => setMaskEnabled(e.target.checked)}
-              />
-              Mask the top of the selected screen before capture
-            </label>
-            {maskEnabled && (
-              <label className="field small">
-                Mask height (% of selected screen)
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={Math.round(maskHeight * 100)}
-                  onChange={(e) =>
-                    setMaskHeight(
-                      Math.max(0, Math.min(1, Number(e.target.value) / 100)),
-                    )
+              <div className="row wrap">
+                <Button
+                  variant="secondary"
+                  disabled={
+                    !session.consent ||
+                    session.off_record ||
+                    paused ||
+                    capture.connecting
                   }
+                  onClick={() => void capture.start()}
+                >
+                  <MonitorUp size={16} />
+                  {capture.connecting
+                    ? "Choosing screen…"
+                    : "Share selected screen"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={!capture.active}
+                  onClick={() => {
+                    cancelQuestions();
+                    setAutomatic(false);
+                    capture.stop();
+                  }}
+                >
+                  Stop sharing
+                </Button>
+              </div>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={maskEnabled}
+                  onChange={(e) => setMaskEnabled(e.target.checked)}
                 />
+                Mask the top of the selected screen before capture
               </label>
-            )}
-            <p className="muted">
-              One frame at a time, about every 1.5 seconds. No access to typing
-              in external apps.
-            </p>
-          </section>
+              {maskEnabled && (
+                <label className="field small">
+                  Mask height (% of selected screen)
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={Math.round(maskHeight * 100)}
+                    onChange={(e) =>
+                      setMaskHeight(
+                        Math.max(0, Math.min(1, Number(e.target.value) / 100)),
+                      )
+                    }
+                  />
+                </label>
+              )}
+              <p className="muted">
+                One frame at a time, about every 1.5 seconds. No access to
+                typing in external apps.
+              </p>
+            </section>
+          )}
           <Timeline events={session.events} onEvidence={onEvidence} />
         </div>
         <aside>

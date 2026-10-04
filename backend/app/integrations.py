@@ -9,6 +9,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     ja_data_dir: str = "data"
+    ja_public_demo: bool = False
+    ja_public_origin: str = ""
+    render_external_url: str = ""
+    ja_frontend_dir: str = ""
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-4.1-mini"
     elevenlabs_api_key: str = Field(default="", repr=False)

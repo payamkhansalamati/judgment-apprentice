@@ -34,6 +34,7 @@ const navigation = [
 ] as const;
 
 export function App() {
+  const [publicDemo, setPublicDemo] = useState(false);
   const [page, setPage] = useState<Page>("overview");
   const [session, setSession] = useState<Session | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -49,19 +50,29 @@ export function App() {
   }, []);
   const onError = useCallback((message: string) => setError(message), []);
   const refresh = useCallback(async () => {
-    setSessions(await api<SessionSummary[]>("/sessions"));
-  }, []);
+    if (!publicDemo) setSessions(await api<SessionSummary[]>("/sessions"));
+  }, [publicDemo]);
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const summaries = await api<SessionSummary[]>("/sessions");
+        const config = await api<{ public_demo: boolean }>("/config");
+        if (cancelled) return;
+        setPublicDemo(config.public_demo);
+        const summaries = config.public_demo
+          ? []
+          : await api<SessionSummary[]>("/sessions");
         if (cancelled) return;
         setSessions(summaries);
         const id = localStorage.getItem("ja-session");
-        if (id && summaries.some((s) => s.id === id)) {
-          const value = await api<Session>(`/sessions/${id}`);
-          if (!cancelled) onSession(value);
+        if (id && (config.public_demo || summaries.some((s) => s.id === id))) {
+          try {
+            const value = await api<Session>(`/sessions/${id}`);
+            if (!cancelled) onSession(value);
+          } catch (error) {
+            if (!config.public_demo) throw error;
+            localStorage.removeItem("ja-session");
+          }
         }
       } catch (error) {
         if (!cancelled)
@@ -194,7 +205,9 @@ export function App() {
             <br />
             Verify it. Teach the next generation.
           </p>
-          <span className="badge">Local MVP</span>
+          <span className="badge">
+            {publicDemo ? "Public simulated demo" : "Local MVP"}
+          </span>
         </div>
       </aside>
       <div className="main-shell">
@@ -210,7 +223,9 @@ export function App() {
                 ? connected
                   ? "Updates connected"
                   : "Updates disconnected"
-                : "Local workspace"}
+                : publicDemo
+                  ? "Public simulated demo"
+                  : "Local workspace"}
             </span>
             <div className="avatar">JA</div>
           </div>
@@ -236,6 +251,14 @@ export function App() {
               </span>
             )}
           </div>
+          {publicDemo && (
+            <p className="notice" role="status">
+              Public simulated demo · Seeded synthetic cases only. Live
+              providers and real screen uploads are disabled. Use fictional
+              information only. Your demo data may reset when the hosting
+              service restarts.
+            </p>
+          )}
           {error && (
             <div className="error-banner" role="alert">
               <span>{error}</span>
@@ -250,7 +273,7 @@ export function App() {
           )}
           {loading ? (
             <div className="card empty" role="status">
-              Connecting to your local workspace…
+              Connecting to your workspace…
             </div>
           ) : (
             <>
@@ -280,13 +303,15 @@ export function App() {
                         >
                           Start simulated demo <ArrowRight size={16} />
                         </Button>
-                        <Button
-                          variant="secondary"
-                          onClick={() => create("live")}
-                          disabled={busy}
-                        >
-                          Start live session
-                        </Button>
+                        {!publicDemo && (
+                          <Button
+                            variant="secondary"
+                            onClick={() => create("live")}
+                            disabled={busy}
+                          >
+                            Start live session
+                          </Button>
+                        )}
                       </div>
                       <p className="muted">
                         The apprentice asks about expert decisions and tutors
@@ -351,64 +376,66 @@ export function App() {
                       </p>
                     </div>
                   </div>
-                  <section className="card">
-                    <div className="row spread">
-                      <div>
-                        <h2>Your sessions</h2>
-                        <p className="muted">
-                          Continue where you left off. Approved maps are saved
-                          locally.
-                        </p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        onClick={() => void perform(refresh)}
-                      >
-                        Refresh
-                      </Button>
-                    </div>
-                    {sessions.length === 0 ? (
-                      <p className="empty">
-                        No sessions yet. Start the simulated demo to capture
-                        your first review.
-                      </p>
-                    ) : (
-                      sessions.map((item) => (
-                        <button
-                          className="session-row"
-                          key={item.id}
-                          onClick={() =>
-                            void perform(async () => {
-                              onSession(
-                                await api<Session>(`/sessions/${item.id}`),
-                              );
-                              setPage(
-                                item.phase === "capture"
-                                  ? "expert"
-                                  : item.phase === "training"
-                                    ? "training"
-                                    : item.phase === "results"
-                                      ? "results"
-                                      : "debrief",
-                              );
-                            })
-                          }
+                  {!publicDemo && (
+                    <section className="card">
+                      <div className="row spread">
+                        <div>
+                          <h2>Your sessions</h2>
+                          <p className="muted">
+                            Continue where you left off. Approved maps are saved
+                            locally.
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          onClick={() => void perform(refresh)}
                         >
-                          <div className="session-icon">
-                            <GitBranch size={20} />
-                          </div>
-                          <span>
-                            <strong>{item.title}</strong>
-                            <small>
-                              {item.id.slice(0, 8)} ·{" "}
-                              {item.phase.replaceAll("_", " ")}
-                            </small>
-                          </span>
-                          <ChevronRight size={18} />
-                        </button>
-                      ))
-                    )}
-                  </section>
+                          Refresh
+                        </Button>
+                      </div>
+                      {sessions.length === 0 ? (
+                        <p className="empty">
+                          No sessions yet. Start the simulated demo to capture
+                          your first review.
+                        </p>
+                      ) : (
+                        sessions.map((item) => (
+                          <button
+                            className="session-row"
+                            key={item.id}
+                            onClick={() =>
+                              void perform(async () => {
+                                onSession(
+                                  await api<Session>(`/sessions/${item.id}`),
+                                );
+                                setPage(
+                                  item.phase === "capture"
+                                    ? "expert"
+                                    : item.phase === "training"
+                                      ? "training"
+                                      : item.phase === "results"
+                                        ? "results"
+                                        : "debrief",
+                                );
+                              })
+                            }
+                          >
+                            <div className="session-icon">
+                              <GitBranch size={20} />
+                            </div>
+                            <span>
+                              <strong>{item.title}</strong>
+                              <small>
+                                {item.id.slice(0, 8)} ·{" "}
+                                {item.phase.replaceAll("_", " ")}
+                              </small>
+                            </span>
+                            <ChevronRight size={18} />
+                          </button>
+                        ))
+                      )}
+                    </section>
+                  )}
                 </>
               ) : session ? (
                 <>
@@ -453,6 +480,7 @@ export function App() {
                   {page === "expert" &&
                     (session.phase === "capture" ? (
                       <ExpertWorkspace
+                        publicDemo={publicDemo}
                         session={session}
                         onSession={onSession}
                         onError={onError}
@@ -713,7 +741,7 @@ export function App() {
       <Modal
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        title="Delete this local session?"
+        title="Delete this session?"
         description="This removes stored evidence, maps, challenges, attempts, and workflow checkpoints. It cannot remove provider-side copies already transmitted."
       >
         <Button

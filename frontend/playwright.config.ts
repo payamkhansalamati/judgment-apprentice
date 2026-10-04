@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
-const backendPort = process.env.JA_E2E_BACKEND_PORT ?? "8000";
+const publicDemo = process.env.JA_E2E_PUBLIC_DEMO === "true";
 const frontendPort = process.env.JA_E2E_FRONTEND_PORT ?? "5173";
+const backendPort = publicDemo
+  ? frontendPort
+  : (process.env.JA_E2E_BACKEND_PORT ?? "8000");
 const backendUrl = `http://127.0.0.1:${backendPort}`;
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 export default defineConfig({
@@ -24,7 +27,10 @@ export default defineConfig({
       cwd: "..",
       url: `${backendUrl}/ready`,
       env: {
-        JA_DATA_DIR: "data/e2e",
+        JA_DATA_DIR: publicDemo ? "data/e2e-public" : "data/e2e",
+        JA_PUBLIC_DEMO: publicDemo ? "true" : "false",
+        JA_PUBLIC_ORIGIN: publicDemo ? frontendUrl : "",
+        JA_FRONTEND_DIR: publicDemo ? "frontend/dist" : "",
         OPENAI_API_KEY: "",
         ELEVENLABS_API_KEY: "",
         ELEVENLABS_INTERVIEWER_AGENT_ID: "",
@@ -33,12 +39,16 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 60_000,
     },
-    {
-      command: `npm run dev -- --host 127.0.0.1 --port ${frontendPort} --strictPort`,
-      url: frontendUrl,
-      env: { JA_BACKEND_URL: backendUrl },
-      reuseExistingServer: false,
-      timeout: 60_000,
-    },
+    ...(publicDemo
+      ? []
+      : [
+          {
+            command: `npm run dev -- --host 127.0.0.1 --port ${frontendPort} --strictPort`,
+            url: frontendUrl,
+            env: { JA_BACKEND_URL: backendUrl },
+            reuseExistingServer: false,
+            timeout: 60_000,
+          },
+        ]),
   ],
 });

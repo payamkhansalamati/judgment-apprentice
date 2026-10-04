@@ -3,14 +3,17 @@ import base64
 import binascii
 from contextlib import asynccontextmanager
 from pathlib import Path
+from secrets import compare_digest, token_urlsafe
 from threading import RLock
 from time import perf_counter
 from typing import Literal
+from urllib.parse import urlsplit
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -102,6 +105,22 @@ class Transcript(BaseModel):
 
 def create_app(data_dir: Path | None = None, settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
+    public_origin = (settings.ja_public_origin or settings.render_external_url).rstrip("/")
+    if settings.ja_public_demo and (
+        urlsplit(public_origin).scheme not in {"http", "https"}
+        or not urlsplit(public_origin).hostname
+    ):
+        raise ValueError("Public demo requires JA_PUBLIC_ORIGIN or RENDER_EXTERNAL_URL")
+    allowed_origins = {public_origin} if settings.ja_public_demo else ALLOWED_ORIGINS
+    allowed_hosts = {"localhost", "127.0.0.1", "testserver"}
+    if settings.ja_public_demo:
+        allowed_hosts.add(urlsplit(public_origin).hostname)
+    # Ownership is intentionally ephemeral, just like the hosted demo data.
+    visitor_sessions: dict[str, str] = {}
+    visitor_cookie = "ja-demo-visitor"
+    frontend = Path(settings.ja_frontend_dir).resolve() if settings.ja_frontend_dir else None
+    if frontend is not None and not (frontend / "index.html").is_file():
+        raise ValueError("JA_FRONTEND_DIR must contain a compiled frontend index.html")
     directory = data_dir or Path(settings.ja_data_dir)
     store = Store(directory)
     workflow = Workflow(directory)
@@ -120,7 +139,7 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
     app.state.store, app.state.service, app.state.providers = store, service, providers
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=sorted(ALLOWED_ORIGINS),
+        allow_origins=sorted(allowed_origins),
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Content-Type"],
     )
@@ -129,10 +148,24 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
     async def local_boundary(request: Request, call_next):
         origin = request.headers.get("origin")
         host = request.headers.get("host", "").split(":")[0]
-        if host not in {"localhost", "127.0.0.1", "testserver"}:
+        if host not in allowed_hosts:
             return JSONResponse({"detail": "This MVP is local-only."}, status_code=403)
-        if origin and origin not in ALLOWED_ORIGINS:
+        if origin and origin not in allowed_origins:
             return JSONResponse({"detail": "Origin is not allowed."}, status_code=403)
+        if settings.ja_public_demo:
+            parts = request.url.path.strip("/").split("/")
+            if parts == ["api", "sessions"] and request.method == "GET":
+                return JSONResponse({"detail": "Session listing is disabled in public demo."}, 403)
+            if parts[:2] == ["api", "sessions"] and len(parts) >= 3:
+                owner = visitor_sessions.get(parts[2])
+                visitor = request.cookies.get(visitor_cookie, "")
+                if not owner or not compare_digest(owner.encode(), visitor.encode()):
+                    return JSONResponse({"detail": "Session or artifact no longer exists."}, 404)
+                if len(parts) >= 4 and parts[3] in {"voice", "tools", "transcript", "frames"}:
+                    return JSONResponse(
+                        {"detail": "Live providers and real capture are disabled in public demo."},
+                        403,
+                    )
         started = perf_counter()
         status = 500
         try:
@@ -155,6 +188,10 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
     def session(session_id: str) -> Session:
         return store.get(session_id)
 
+    @app.get("/api/config")
+    def configuration():
+        return {"public_demo": settings.ja_public_demo}
+
     @app.get("/health")
     def health():
         return {"status": "alive"}
@@ -170,8 +207,9 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
         return {
             "status": "ready",
             "simulated": True,
-            "live_vision_configured": bool(settings.openai_api_key),
-            "live_voice_configured": bool(
+            "live_vision_configured": not settings.ja_public_demo and bool(settings.openai_api_key),
+            "live_voice_configured": not settings.ja_public_demo
+            and bool(
                 settings.elevenlabs_api_key
                 and settings.elevenlabs_interviewer_agent_id
                 and settings.elevenlabs_tutor_agent_id
@@ -183,11 +221,26 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
         return store.list()
 
     @app.post("/api/sessions")
-    def create(body: CreateSession):
+    def create(body: CreateSession, request: Request, response: Response):
+        if settings.ja_public_demo and body.mode != "simulated":
+            raise HTTPException(403, "Only the simulated journey is enabled in public demo.")
         item = seed_session(str(uuid4()), body.mode)
         with lock:
             workflow.start(item.id)
             store.save(item)
+            if settings.ja_public_demo:
+                visitor = request.cookies.get(visitor_cookie, "")
+                if visitor not in visitor_sessions.values():
+                    visitor = token_urlsafe(32)
+                visitor_sessions[item.id] = visitor
+                response.set_cookie(
+                    visitor_cookie,
+                    visitor,
+                    httponly=True,
+                    secure=urlsplit(public_origin).scheme == "https",
+                    samesite="strict",
+                    max_age=86400,
+                )
         return item
 
     @app.get("/api/sessions/{session_id}")
@@ -200,6 +253,7 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
             session(session_id)
             workflow.remove(session_id)
             store.remove(session_id)
+            visitor_sessions.pop(session_id, None)
         return {"deleted": True, "derived_knowledge_invalidated": True}
 
     @app.post("/api/sessions/{session_id}/recording")
@@ -687,12 +741,15 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
     @app.websocket("/api/sessions/{session_id}/events")
     async def events(websocket: WebSocket, session_id: str):
         host = websocket.headers.get("host", "").split(":")[0]
-        if (
-            host not in {"localhost", "127.0.0.1", "testserver"}
-            or websocket.headers.get("origin") not in ALLOWED_ORIGINS
-        ):
+        if host not in allowed_hosts or websocket.headers.get("origin") not in allowed_origins:
             await websocket.close(code=1008)
             return
+        if settings.ja_public_demo:
+            owner = visitor_sessions.get(session_id)
+            visitor = websocket.cookies.get(visitor_cookie, "")
+            if not owner or not compare_digest(owner.encode(), visitor.encode()):
+                await websocket.close(code=1008)
+                return
         try:
             session(session_id)
         except KeyError:
@@ -717,6 +774,29 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
             return
         except KeyError:
             await websocket.close(code=1000)
+
+    if frontend is not None:
+        app.mount("/assets", StaticFiles(directory=frontend / "assets"), name="assets")
+
+        @app.middleware("http")
+        async def frontend_page(request: Request, call_next):
+            response = await call_next(request)
+            path = request.url.path.lstrip("/")
+            if (
+                response.status_code != 404
+                or request.method not in {"GET", "HEAD"}
+                or path == "api"
+                or path.startswith(("api/", "assets/"))
+            ):
+                return response
+            target = (frontend / path).resolve()
+            if not target.is_relative_to(frontend):
+                return response
+            if target.is_file():
+                return FileResponse(target, headers={"Cache-Control": "no-cache"})
+            if Path(path).suffix:
+                return response
+            return FileResponse(frontend / "index.html", headers={"Cache-Control": "no-cache"})
 
     return app
 
