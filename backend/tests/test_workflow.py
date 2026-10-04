@@ -56,7 +56,7 @@ def test_required_gaps_and_explicit_current_version_confirmation(client):
     assert all(challenge["case"]["decision"] is None for challenge in session["challenges"])
 
 
-def test_expert_correction_invalidates_descendants_and_requires_reconfirmation(client):
+def test_expert_correction_preserves_pinned_training_and_requires_reconfirmation(client):
     session = approved_session(client)
     base = f"/api/sessions/{session['id']}"
     old_challenge = session["challenges"][0]["id"]
@@ -68,15 +68,17 @@ def test_expert_correction_invalidates_descendants_and_requires_reconfirmation(c
     current = response.json()
     assert current["work_map"]["version"] == 2
     assert current["work_map"]["status"] == "draft"
-    assert current["challenges"] == current["attempts"] == []
-    assert current["phase"] == "debrief"
+    assert current["challenges"] == session["challenges"]
+    assert current["approved_maps"][0] == session["work_map"]
+    assert current["training_map_version"] == 1
+    assert current["phase"] == "training"
     assert all(rule["confirmation"] is None for rule in current["work_map"]["rules"])
     assert (
         client.post(
             f"{base}/challenges/{old_challenge}/answer",
             json={"decision": "Hold", "reason": "Version mismatch"},
         ).status_code
-        == 409
+        == 200
     )
     assert (
         client.post(f"{base}/map/confirm", json={"version": 2, "explicit": True}).status_code == 409
@@ -97,7 +99,8 @@ def test_pending_teach_back_must_be_repeated_after_correction(client):
     assert client.post(f"{base}/map/correct", json=correction).status_code == 200
     assert client.post(f"{base}/map/teach-back").status_code == 200
     response = client.post(f"{base}/map/correct", json=correction)
-    assert response.json()["phase"] == "debrief"
+    assert response.json()["phase"] == "training"
+    assert not response.json()["map_review_ready"]
     assert (
         client.post(f"{base}/map/confirm", json={"version": 2, "explicit": True}).status_code == 409
     )

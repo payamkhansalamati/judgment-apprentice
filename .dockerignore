@@ -13,3 +13,14 @@
 data
 .DS_Store
 **/*.tsbuildinfo
+
+# Keep local artifacts and credentials out of image build contexts
+demo
+**/*.mp4
+**/*.webm
+**/*.mov
+**/*.m4v
+**/*.mp3
+**/*.wav
+**/*.pem
+**/*.key

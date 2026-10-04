@@ -1,4 +1,12 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
+import {
+  cancelDemoAudio,
+  disableDemoAudio,
+  enableDemoAudio,
+  speakDemo,
+  useDemoAudio,
+} from "../demoAudio";
+import { Button } from "./ui/button";
 import type { Session } from "../contracts";
 
 const LiveVoiceCompanion = lazy(() => import("./LiveVoiceCompanion"));
@@ -10,6 +18,10 @@ export interface VoiceCompanionProps {
   role: "interviewer" | "tutor";
   challengeId?: string;
   offRecord: boolean;
+  consent?: boolean;
+  captureActive?: boolean;
+  pendingAnswer?: boolean;
+  replayText?: string;
   context?: string;
   paused?: boolean;
   question?: { id: string; text: string } | null;
@@ -17,32 +29,13 @@ export interface VoiceCompanionProps {
   onSessionChange?: (session: Session) => void;
   onActivity?: () => void;
   onConnectionChange?: (connected: boolean) => void;
+  onUserSpeakingChange?: (speaking: boolean) => void;
   onSpeakingChange?: (speaking: boolean) => void;
 }
 
 export function VoiceCompanion(props: VoiceCompanionProps) {
   if (props.sessionMode === "simulated") {
-    return (
-      <section className="card voice-companion" aria-label="Voice companion">
-        <div className="row">
-          <h3>
-            {props.role === "tutor" ? "Learning companion" : "Expert companion"}
-          </h3>
-          <span className="badge">Simulated voice</span>
-        </div>
-        <p className="muted">
-          Scripted questions and answers support this demo. Use the written
-          conversation below at any time.
-        </p>
-        <p className="status">
-          {props.offRecord
-            ? "Off record · recording stopped"
-            : props.paused
-              ? "Paused"
-              : "Ready for the next question"}
-        </p>
-      </section>
-    );
+    return <DemoVoiceCompanion {...props} />;
   }
   return (
     <Suspense
@@ -59,5 +52,83 @@ export function VoiceCompanion(props: VoiceCompanionProps) {
     >
       <LiveVoiceCompanion key={`${props.sessionId}:${props.role}`} {...props} />
     </Suspense>
+  );
+}
+
+function DemoVoiceCompanion(props: VoiceCompanionProps) {
+  const audio = useDemoAudio();
+  useEffect(() => {
+    if (props.offRecord || props.paused) cancelDemoAudio();
+  }, [props.offRecord, props.paused]);
+  useEffect(() => () => cancelDemoAudio(), []);
+  const blocked = props.offRecord || props.paused;
+  const status =
+    props.consent === false
+      ? "Consent required before recording or audio."
+      : props.offRecord
+        ? "Off record · recording and audio stopped"
+        : props.paused
+          ? "Paused · questions and audio stopped"
+          : props.role === "tutor"
+            ? "Simulated tutor · written evidence remains available"
+            : props.pendingAnswer
+              ? "Waiting for the expert’s answer"
+              : props.captureActive
+                ? "Automatic capture active · waiting for eligible question cues"
+                : "Automatic capture stopped · Ask now remains available";
+  return (
+    <section className="card voice-companion" aria-label="Voice companion">
+      <div className="row">
+        <h3>
+          {props.role === "tutor" ? "Learning companion" : "Expert companion"}
+        </h3>
+        <span className="badge">Simulated voice</span>
+      </div>
+      <p className="muted">
+        Credential-free browser speech. Enable audio with a click, then test
+        playback. Written dialogue works independently.
+      </p>
+      <p className="status">{status}</p>
+      <div className="row wrap">
+        <Button
+          variant="secondary"
+          disabled={blocked || audio.enabled}
+          onClick={enableDemoAudio}
+        >
+          Enable demo audio
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={blocked || !audio.enabled}
+          onClick={() =>
+            speakDemo(
+              "This is Judgment Apprentice. Your browser voice is ready for the synthetic demo.",
+            )
+          }
+        >
+          Test voice
+        </Button>
+        {audio.enabled && (
+          <Button variant="ghost" onClick={disableDemoAudio}>
+            Mute audio
+          </Button>
+        )}
+        <Button
+          variant="secondary"
+          disabled={blocked || !audio.enabled || !props.replayText}
+          onClick={() => speakDemo(props.replayText!)}
+        >
+          Replay question
+        </Button>
+        <Button
+          variant="ghost"
+          disabled={!audio.speaking}
+          onClick={cancelDemoAudio}
+        >
+          Stop voice
+        </Button>
+      </div>
+      <p role="status">{audio.message}</p>
+    </section>
   );
 }

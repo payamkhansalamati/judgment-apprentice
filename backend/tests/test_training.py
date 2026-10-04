@@ -34,7 +34,7 @@ def test_scoring_preserves_first_answer_and_distinguishes_assistance(client, ass
         assert attempt["corrected_reason"] == VERSION_REASON
 
 
-def test_reason_rubric_rejects_arbitrary_text_and_incomplete_assessment(client):
+def test_reason_rubric_rejects_arbitrary_text_and_assesses_only_intended_violation(client):
     session = approved_session(client)
     base = f"/api/sessions/{session['id']}"
     practice, assessment = session["challenges"]
@@ -46,10 +46,10 @@ def test_reason_rubric_rejects_arbitrary_text_and_incomplete_assessment(client):
     assert response.json()["reason_feedback"] == ["report and software version mismatch"]
     response = client.post(
         f"{base}/challenges/{assessment['id']}/answer",
-        json={"decision": "Hold", "reason": "Tests do not cover the changed refund calculation."},
+        json={"decision": "Hold", "reason": "The report is an older version."},
     )
     assert not response.json()["saved"]
-    assert response.json()["reason_feedback"] == ["reviewer independence from the author"]
+    assert response.json()["reason_feedback"] == ["test coverage of the changed functionality"]
     response = client.post(
         f"{base}/challenges/{assessment['id']}/answer",
         json={"decision": "Hold", "reason": ASSESSMENT_REASON},
@@ -57,7 +57,6 @@ def test_reason_rubric_rejects_arbitrary_text_and_incomplete_assessment(client):
     assert response.json()["saved"]
     assert set(response.json()["session"]["attempts"][1]["assessed_skills"]) == {
         "coverage",
-        "independent_review",
     }
 
 

@@ -108,6 +108,7 @@ function LiveVoiceSession(props: VoiceCompanionProps) {
       running.current = false;
       latest.current.onConnectionChange?.(false);
       latest.current.onSpeakingChange?.(false);
+      latest.current.onUserSpeakingChange?.(false);
     },
     onError: () => {
       setError(
@@ -116,6 +117,7 @@ function LiveVoiceSession(props: VoiceCompanionProps) {
       void stopRef.current();
     },
     onVadScore: ({ vadScore }) => {
+      latest.current.onUserSpeakingChange?.(mayRecord() && vadScore >= 0.5);
       if (
         !mayRecord() ||
         vadScore < 0.5 ||
@@ -264,6 +266,7 @@ function LiveVoiceSession(props: VoiceCompanionProps) {
     setMicrophoneMuted(true);
     latest.current.onConnectionChange?.(false);
     latest.current.onSpeakingChange?.(false);
+    latest.current.onUserSpeakingChange?.(false);
     try {
       await endSession();
     } catch {

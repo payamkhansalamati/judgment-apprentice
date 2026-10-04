@@ -12,3 +12,14 @@ playwright-report/
 test-results/
 .DS_Store
 *.tsbuildinfo
+
+# Local presentation workspace and generated media
+/demo/
+*.mp4
+*.webm
+*.mov
+*.m4v
+*.mp3
+*.wav
+*.pem
+*.key

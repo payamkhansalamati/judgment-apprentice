@@ -3,26 +3,26 @@ import type { Node, Edge } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useState } from "react";
 import type { Rule, Session } from "../contracts";
+import { CorrectionEditor } from "./CorrectionEditor";
 import { Button } from "./ui/button";
 
 export function KnowledgeMap({
   session,
   onEvidence,
-  onCorrect,
-  busy,
+  onSession,
+  onError,
 }: {
   session: Session;
   onEvidence: (id: string) => void;
-  onCorrect: (id: string, reason: string) => void;
-  busy: boolean;
+  onSession: (value: Session) => void;
+  onError: (value: string) => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const [edit, setEdit] = useState("");
   const rules = session.work_map.rules;
   const rule = rules.find((r) => r.id === selected);
   const nodes: Node[] = rules.map((rule, index) => ({
     id: rule.id,
-    position: { x: index * 310, y: 30 },
+    position: { x: 30, y: index * 180 + 30 },
     data: {
       label: (
         <div className="map-node">
@@ -46,23 +46,39 @@ export function KnowledgeMap({
   }));
   nodes.push({
     id: "hold",
-    position: { x: 310, y: 210 },
+    position: { x: 390, y: 360 },
     data: { label: "Missing or ambiguous → Hold / Escalate" },
     style: { width: 260, background: "#fff7e8", borderColor: "#d9b16a" },
   });
+  nodes.push({
+    id: "ready",
+    position: { x: 390, y: 100 },
+    data: { label: "All supported checks pass → Ready for approval" },
+    style: { width: 260, background: "#eefaf6", borderColor: "#92b9b3" },
+  });
   const edges: Edge[] = [
+    {
+      id: "ready-outcome",
+      source: rules[2].id,
+      target: "ready",
+      type: "smoothstep",
+      label: "All checks pass",
+      markerEnd: { type: MarkerType.ArrowClosed },
+    },
     ...rules.slice(0, 2).map((r, i) => ({
       id: `next-${r.id}`,
       source: r.id,
       target: rules[i + 1].id,
-      label: "Evidence matches",
+      type: "smoothstep",
+      label: "Check passes",
       markerEnd: { type: MarkerType.ArrowClosed },
     })),
     ...rules.map((r) => ({
       id: `hold-${r.id}`,
       source: r.id,
       target: "hold",
-      label: "Check fails",
+      type: "smoothstep",
+      label: `${r.title}: fails`,
       style: { stroke: "#b88542" },
       markerEnd: { type: MarkerType.ArrowClosed },
     })),
@@ -79,6 +95,13 @@ export function KnowledgeMap({
         </div>
         <span className="badge neutral">Fictional company policies</span>
       </div>
+      <p className="muted">
+        Approved history:{" "}
+        {session.approved_maps.map((map) => `v${map.version}`).join(", ") ||
+          "None"}
+        . Training remains pinned to v{session.training_map_version ?? "—"}{" "}
+        until explicitly selected.
+      </p>
       <div className="map-canvas" aria-label="Interactive Work Map">
         <ReactFlow
           nodes={nodes}
@@ -87,7 +110,6 @@ export function KnowledgeMap({
           nodesDraggable={false}
           onNodeClick={(_, node) => {
             setSelected(node.id);
-            setEdit(rules.find((r) => r.id === node.id)?.reason ?? "");
           }}
         >
           <Background gap={24} />
@@ -101,7 +123,6 @@ export function KnowledgeMap({
             key={rule.id}
             onClick={() => {
               setSelected(rule.id);
-              setEdit(rule.reason);
             }}
           >
             <strong>{rule.title}</strong>
@@ -151,23 +172,22 @@ export function KnowledgeMap({
                 key={id}
                 onClick={() => onEvidence(id)}
               >
-                Evidence {index + 1}
+                Expert evidence {index + 1}
               </Button>
             ))}
           </div>
-          <label className="field">
-            Correct this reasoning
-            <textarea
-              value={edit}
-              onChange={(event) => setEdit(event.target.value)}
-            />
-          </label>
-          <Button
-            disabled={busy || !edit.trim() || edit === rule.reason}
-            onClick={() => onCorrect(rule.id, edit)}
-          >
-            Save expert correction
-          </Button>
+          <p>
+            Required extra tests:{" "}
+            {rule.parameters.required_test_scope.join(", ") || "None"} · Failure
+            action: {rule.parameters.failure_decision}
+          </p>
+          <CorrectionEditor
+            key={`${rule.id}-${session.work_map.version}`}
+            session={session}
+            rule={rule}
+            onSession={onSession}
+            onError={onError}
+          />
           <p className="muted">
             Changes to an approved map create a new version and require
             confirmation.

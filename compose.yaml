@@ -9,9 +9,13 @@ services:
     environment:
       JA_DATA_DIR: /app/data
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${JA_BACKEND_PORT:-8000}:8000"
     volumes:
       - judgment-data:/app/data
+    init: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
       interval: 5s
@@ -25,10 +29,20 @@ services:
     environment:
       JA_BACKEND_URL: http://backend:8000
     ports:
-      - "127.0.0.1:4173:4173"
+      - "127.0.0.1:4173:8080"
+    init: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/ready"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 5s
 
 volumes:
   judgment-data:

@@ -1,131 +1,133 @@
 # Judgment Apprentice
 
-**Capture expert judgment. Verify it. Teach the next generation.**
+An expert’s checklist tells a newcomer what to inspect. Judgment Apprentice captures why the expert stops, what evidence matters, and when a decision needs escalation.
 
-“All tests passed. So why did the expert stop the release?”
+The application follows a fictional software-release review from expert explanation to learner assessment. It combines a React workspace, a FastAPI backend, SQLite persistence, and a checkpointed LangGraph workflow. The complete simulated workflow runs without API keys.
 
-This local hackathon MVP captures a software reviewer’s reasoning, links it to stored evidence, asks for an explicit teach-back confirmation, and teaches a newcomer with unseen cases. The synthetic review portal uses **fictional company policies**. It makes no certification or standards-compliance claims.
+## What you can do
 
-The default **simulated demo** runs without paid API credentials. Scripted questions and answers use browser speech synthesis and are visibly identified, as are simulated model observations. Browser screen sharing is available independently of live AI. Live ElevenLabs voice and OpenAI vision use separate adapters and require setup; real provider sessions have not been exercised with credentials.
+- Capture a synthetic review and the expert’s explanations, with explicit consent and off-record controls.
+- Explore counterfactual questions and resolve gaps during debrief.
+- Review proposed corrections, inspect their diff, and explicitly confirm a versioned Work Map.
+- Follow rules back to stored evidence and preserve older approved versions.
+- Approve rule-conditioned practice and assessment cases before training begins.
+- Block unsupported approval attempts and distinguish independent, corrected, and assisted learner outcomes.
+- Optionally connect OpenAI visual observations and private ElevenLabs interviewer/tutor agents.
 
-## Local setup on macOS
+Expert confirmation governs policy. Model observations and generated proposals do not independently approve a rule or save a review decision. Simulated answers, browser speech, and live provider interactions are labeled separately.
 
-Install Python 3.11 or newer, `uv`, and Node.js 22.12+ (or a compatible newer version). The project uses Python and npm lockfiles. Run these commands in the repository:
+## Quick start with Docker
 
-```bash
-cd /Users/payam/Documents/judgment-apprentice
-cp .env.example .env
-uv sync --frozen
-cd frontend
-npm ci
-cd ..
-```
-
-Keep `.env` local and ignored. Leave its API key values empty for the simulated demo. No keys belong in a `VITE_` variable or browser bundle.
-
-Start the backend in one terminal:
+Requires Docker Engine or Docker Desktop and Docker Compose **2.24 or later**.
 
 ```bash
-cd /Users/payam/Documents/judgment-apprentice
-uv run uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+test -f .env || cp .env.example .env
+docker compose up -d --build --wait
 ```
 
-Start the frontend in another terminal:
+Open **http://127.0.0.1:4173**. Readiness is available at `http://127.0.0.1:4173/ready`. No credentials are required for simulated mode.
+
+The frontend serves a compiled static build through unprivileged Nginx. API requests and WebSocket events use the same origin. Both published ports bind to localhost; the backend runs as a non-root user and stores sessions in the `judgment-data` volume.
+
+If port 8000 is occupied, choose a free backend port:
 
 ```bash
-cd /Users/payam/Documents/judgment-apprentice/frontend
-npm run dev -- --host 127.0.0.1
+JA_BACKEND_PORT=8001 docker compose up -d --build --wait
 ```
 
-Open **http://127.0.0.1:5173**. The API documentation is at **http://127.0.0.1:8000/docs**. This MVP has no user authentication; keep both services bound to loopback. Explicit allowed browser origins are localhost/127.0.0.1 on ports 5173 and 4173.
+Keep that variable set for subsequent Compose commands. Port 4173 must be available. Stop with `docker compose down`; this preserves stored sessions. See the [deployment guide](docs/DEPLOYMENT.md) for startup verification, private remote hosting, persistence, and updates.
 
-If macOS or the browser refuses screen sharing, allow the browser in System Settings → Privacy & Security → Screen & System Audio Recording, restart the browser if requested, and retry using the app’s explicit sharing control. The system picker decides which surface is shared. Typed interaction remains available when microphone permission is denied.
+## Local development
 
-## Try the complete journey
-
-1. Choose **Start simulated demo** and select **I consent to capturing this synthetic review and its answers.**
-2. In **Expert workspace**, review A, B, and C. Use **Ask now** and **Play scripted answer** for the three conditions, including the counterfactual and independent-review guardrail.
-3. Choose **Start debrief**, answer all three gaps with **Use demo answer**, then enter “Only if tests cover every changed functionality, versions match, and an independent reviewer signs off.” and choose **Save expert correction**.
-4. Choose **Review teach-back**, then **Confirm this map** for the current version. Approve the two generated challenge templates before assessment.
-5. Try “Ready for approval” on the first unseen case. The server records the first answer but blocks the unsafe save. Inspect linked evidence, then correct to Hold.
-6. Complete the unseen assessment and inspect independent/assisted outcomes in Results.
-
-The full recording guide is in [docs/DEMO.md](docs/DEMO.md). It is a storyboard and script; no demo video is generated.
-
-## Persistence and resetting synthetic data
-
-Sessions, cases, evidence, Work Maps, and attempts are stored in `data/app.sqlite`. LangGraph checkpoints are stored in `data/workflow.sqlite`. Refreshing the browser preserves approved work.
-
-Create a new session to get the same seeded expert cases and a clean workflow. To remove all simulated sessions and their local derived artifacts, keep the backend running and use:
-
-```bash
-uv run python scripts/reset_demo.py
-```
-
-The reset script preserves live sessions. After reset, choose **Start simulated demo** to seed a new session. Open a session and use **Delete session**, then **Delete session and evidence** to remove its local evidence, archived map versions, challenges, attempts, and checkpoint thread. API equivalents:
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/sessions \
-  -H 'Content-Type: application/json' \
-  -d '{"mode":"simulated"}'
-
-# Replace SESSION_ID with the id returned by the create endpoint.
-curl -X DELETE http://127.0.0.1:8000/api/sessions/SESSION_ID
-```
-
-Local deletion does not remove provider-side recordings or independent backups and does not guarantee secure erasure of every SQLite/journal file. See [privacy and limitations](docs/LIMITATIONS.md).
-
-## Checks
+Requires Python **3.11+**, [uv](https://docs.astral.sh/uv/), and Node.js **22.12+**.
 
 From the repository root:
 
 ```bash
-uv run ruff check backend
-uv run pytest
+test -f .env || cp .env.example .env
+uv sync --frozen
+npm ci --prefix frontend
 ```
 
-From `frontend`:
+Start the backend:
 
 ```bash
-npm run lint
-npm run typecheck
-npm run build
-npx playwright install chromium
-
-# Stop any existing backend/frontend servers first; Playwright starts both.
-npm run test:e2e
+uv run uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-On macOS 13, where the current Playwright Chromium download may be unsupported, use an installed Google Chrome instead:
+In another terminal, start the frontend:
 
 ```bash
-PLAYWRIGHT_CHANNEL=chrome npm run test:e2e
+npm run dev --prefix frontend -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-Paid integrations are mocked in automated tests. A passing mock test validates the adapter contract, not a live account, voice quality, microphone permission, or browser picker.
+Open **http://127.0.0.1:5173**. These ports must be available. The development proxy uses `JA_BACKEND_URL` when supplied; backend requests retain the localhost host boundary. Local sessions and workflow checkpoints are stored under `data/`.
 
-`GET /health` reports that the API process responds. `GET /ready` also checks SQLite storage and checkpoint connectivity and reports whether live credentials are configured. “Configured” does not verify credentials or provider availability.
+## Try the workflow
 
-## Live setup and architecture
+1. Start **simulated demo**, grant capture consent, and save **Hold** on the release with mismatched report versions.
+2. Start capture and answer the apprentice’s questions. Scripted answers are available explicitly in simulated mode. Browser audio is optional; use **Enable demo audio** and **Test voice**.
+3. Complete debrief. Review a proposed correction or keep the initial rules, then review teach-back and explicitly confirm the displayed map version.
+4. Inspect a rule and its evidence. Review and approve both challenge cases, then begin training.
+5. Try **Ready for approval** on a failing case. The server retains the attempt but blocks the unsafe decision. Explain the actual failed condition and submit a safe decision.
+6. Complete the separate assessment and inspect Results. Assisted practice and independent performance remain distinct.
 
-[Live setup](docs/LIVE_SETUP.md) describes the two private ElevenLabs agents, local environment variables, conversation context, and supported client tools. Missing live credentials produce a setup error; a live session never silently becomes simulated.
+The [interactive walkthrough](docs/DEMO.md) includes the supported security-regression correction example. Changes to an approved map create a new draft; existing training stays pinned to its selected approved version.
 
-[Architecture](docs/ARCHITECTURE.md) explains the workflow, policy gate, event contract, and capture boundaries. [Acceptance checklist](docs/ACCEPTANCE.md) maps the requested behaviors to implementation and verification. [Limitations](docs/LIMITATIONS.md) records practical gaps.
+## Optional live integrations
 
-## Local containers
+Add credentials only to the ignored root `.env`:
 
-After the local checks pass, use Docker with Compose 2.24 or newer:
+```dotenv
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1-mini
+ELEVENLABS_API_KEY=
+ELEVENLABS_INTERVIEWER_AGENT_ID=
+ELEVENLABS_TUTOR_AGENT_ID=
+```
+
+Restart the backend after editing configuration. Keys stay server-side. Live mode requires private agents configured with matching client tools and browser microphone permission; it does not silently fall back to simulated answers. See [live setup](docs/LIVE_SETUP.md).
+
+Readiness reports whether required configuration is present, not whether credentials are valid. Automated provider tests use the official SDKs with mocked HTTP responses. Live in-app vision and agent conversations still require an end-to-end manual check.
+
+## Verification
 
 ```bash
-cd /Users/payam/Documents/judgment-apprentice
-# Stop the local backend first so port 8000 is free.
-docker compose up --build
+uv run ruff check backend scripts
+uv run pytest -q
+npm run lint --prefix frontend
+npm run typecheck --prefix frontend
+npm run build --prefix frontend
+python3 scripts/check_publication.py
 ```
 
-Open **http://127.0.0.1:4173**. The backend remains accessible at **http://127.0.0.1:8000**. Both published ports bind to loopback. The frontend uses Vite preview to serve its production build and proxy API/WebSocket calls to the backend container. This is a local reproducibility setup.
+For browser checks, install Chromium once:
 
-The root `.env` is optional: an absent file starts the credential-free demo; an existing file supplies only the backend's live settings. Secret files, local databases, caches, and dependency folders are excluded from image build contexts. Compose 2.24+ supports the [optional environment file](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/); Python dependencies use the frozen lockfile and the [documented uv container workflow](https://docs.astral.sh/uv/guides/integration/docker/).
+```bash
+npm exec --prefix frontend -- playwright install chromium
+JA_E2E_BACKEND_PORT=18000 JA_E2E_FRONTEND_PORT=4173 npm run test:e2e --prefix frontend
+```
 
-Container evidence lives in the named `judgment-data` volume, separately from the local `data/` directory. Use the app's session deletion control to remove a session. Stop containers without deleting that volume with `docker compose down`.
+The selected ports must be free. Browser tests launch isolated servers, leave existing servers alone, and clear provider credentials in the test backend. Frontend test ports must be 5173 or 4173 because the backend deliberately restricts browser origins. To use installed Google Chrome instead, set `PLAYWRIGHT_CHANNEL=chrome`.
 
-Docker is unavailable on the implementation host, so image builds and Compose startup have not been exercised. No service was published, pushed, or provisioned.
+GitHub Actions runs backend checks, frontend checks, browser tests, the publication audit, and a Docker build/startup smoke check. Its first remote run will establish container runtime validation; the current development machine has no Docker installation.
+
+## Project layout
+
+```text
+backend/app/        API, workflow, policies, provider adapters, persistence
+backend/tests/      Policy, API, versioning, privacy, and provider tests
+frontend/src/       React workspace, capture controls, map, training, audio
+frontend/e2e/       Browser journeys and timing/privacy checks
+docs/               Architecture, deployment, walkthrough, and limitations
+scripts/            Local maintenance and publication checks
+compose.yaml        Localhost container deployment
+```
+
+## Boundaries
+
+This is a single-user prototype with fictional policies and a small supported rule vocabulary. The explanation rubric is a deterministic English heuristic. Passing a case does not establish mastery or certification. Automatic question timing cannot observe activity outside this application.
+
+There is no user authentication, tenant isolation, or public-hosted service boundary. Keep the app on localhost, or access a private host through an authenticated SSH tunnel. Public source availability does not make the running service suitable for anonymous internet access. Keep one backend worker while the workflow uses its process-local mutation lock.
+
+Capture is opt-in. Off-record stops new capture and audio while preserving earlier evidence. Session deletion removes local artifacts; it cannot remove provider-side copies or external backups. See [limitations and privacy](docs/LIMITATIONS.md), [architecture](docs/ARCHITECTURE.md), and the [release review](docs/AUDIT.md).

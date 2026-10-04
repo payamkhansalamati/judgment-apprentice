@@ -1,6 +1,6 @@
 # Live provider setup
 
-Live adapters are implemented separately from the simulated demo. **No live service was tested with paid credentials.** Do not enter keys in chat. Set them only in the ignored repository-root `.env` and restart the backend.
+Live adapters are implemented separately from the simulated demo. **Live in-app vision and ElevenAgents conversations have not been verified end to end.** Do not enter keys in chat. Set them only in the ignored repository-root `.env` and restart the backend.
 
 ```dotenv
 OPENAI_API_KEY=your-local-key
@@ -10,7 +10,7 @@ ELEVENLABS_INTERVIEWER_AGENT_ID=your-private-interviewer-agent-id
 ELEVENLABS_TUTOR_AGENT_ID=your-private-tutor-agent-id
 ```
 
-The selected OpenAI model must support image input and structured responses in your account. The Python adapter uses the official SDK’s Responses API and a validated observation schema. Requests use `store=False`, a bounded output size, and a provider timeout. These settings do not guarantee zero external retention. No generated code is executed. API shapes were verified with the installed SDK and mocked HTTP calls; real credentials remain untested. The official [structured output guide](https://developers.openai.com/api/docs/guides/structured-outputs) and [image input guide](https://developers.openai.com/api/docs/guides/images-vision) describe the provider features used here. Missing credentials produce an actionable setup error.
+The selected OpenAI model must support image input and structured responses in your account. The Python adapter uses the official SDK’s Responses API and a validated observation schema. Requests use `store=False`, a bounded output size, and a provider timeout. These settings do not guarantee zero external retention. No generated code is executed. API shapes were verified with the installed SDK and mocked HTTP calls; real in-app provider workflows still need the manual smoke check below. The official [structured output guide](https://developers.openai.com/api/docs/guides/structured-outputs) and [image input guide](https://developers.openai.com/api/docs/guides/images-vision) describe the provider features used here. Missing credentials produce an actionable setup error.
 
 ## Configure two private ElevenAgents
 

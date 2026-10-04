@@ -32,15 +32,11 @@ def seed_session(session_id: str, mode: str) -> Session:
         author="Alex Chen",
         reviewer="Morgan Lee",
     )
-    cases = [Case(id="A", title="A · Complete evidence", **base)]
+    cases = [Case(id="A", title="Case A · Release review", **base)]
     cases.append(
-        Case(id="B", title="B · Green tests, older report", **{**base, "report_version": "2.4.0"})
+        Case(id="B", title="Case B · Release review", **{**base, "report_version": "2.4.0"})
     )
-    cases.append(
-        Case(
-            id="C", title="C · The changed feature is untested", **{**base, "test_scope": ["login"]}
-        )
-    )
+    cases.append(Case(id="C", title="Case C · Release review", **{**base, "test_scope": ["login"]}))
     rules = [
         Rule(id=kind, kind=kind, title=title, guardrails=[title])
         for kind, title in [

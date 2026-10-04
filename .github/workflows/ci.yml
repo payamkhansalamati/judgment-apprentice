@@ -1,0 +1,70 @@
+name: Verify application
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.26'
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: uv sync --frozen
+      - run: uv run ruff check backend scripts
+      - run: uv run pytest -q
+      - run: python scripts/check_publication.py
+      - run: npm ci --prefix frontend
+      - run: npm run lint --prefix frontend
+      - run: npm run format:check --prefix frontend
+      - run: npm run typecheck --prefix frontend
+      - run: npm run build --prefix frontend
+      - run: npm exec --prefix frontend -- playwright install --with-deps chromium
+      - run: npm run test:e2e --prefix frontend
+      - name: Retain browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-results
+          path: frontend/test-results
+          retention-days: 7
+
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.26'
+      - run: uv sync --frozen --no-dev
+      - run: docker compose config --quiet
+      - run: docker compose up -d --build --wait --wait-timeout 120
+      - run: uv run --no-dev python scripts/container_smoke.py
+      - name: Container diagnostics
+        if: failure()
+        run: docker compose logs --tail=100
+      - name: Clean up containers
+        if: always()
+        run: docker compose down -v

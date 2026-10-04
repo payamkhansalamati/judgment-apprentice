@@ -14,9 +14,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from .contracts import Decision, Session
+from .contracts import CorrectionExtraction, Decision, Session, StructuredCorrection
 from .diagnostics import request_completed
 from .integrations import ProviderConfigurationError, Providers, Settings
+from .knowledge import proposal, simulated_extraction
 from .policies import evaluate
 from .seed import DEMO_ANSWERS, seed_session
 from .services import Apprenticeship, DomainError
@@ -49,6 +50,24 @@ class Answer(BaseModel):
 class Correction(BaseModel):
     rule_id: str
     reason: str = Field(min_length=1, max_length=4000)
+
+
+class ProposedCorrection(Correction):
+    structured: StructuredCorrection | None = None
+
+
+class ApplyCorrection(BaseModel):
+    explicit: bool
+
+
+class QuestionCue(BaseModel):
+    condition: str | None = None
+    case_id: str | None = None
+
+
+class TrainingVersion(BaseModel):
+    version: int
+    seed: int = Field(default=17, ge=0, le=1_000_000)
 
 
 class Confirmation(BaseModel):
@@ -193,10 +212,12 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
         return item
 
     @app.post("/api/sessions/{session_id}/questions")
-    def question(session_id: str):
+    def question(session_id: str, body: QuestionCue | None = None):
         with lock:
             item = session(session_id)
-            question = service.ask(item)
+            question = service.ask(
+                item, body.condition if body else None, body.case_id if body else None
+            )
             store.save(item)
         case_id = next(
             (
@@ -247,6 +268,119 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
         with lock:
             item = session(session_id)
             service.correct(item, body.rule_id, body.reason)
+            store.save(item)
+        return item
+
+    @app.post("/api/sessions/{session_id}/map/corrections/propose")
+    async def propose_correction(session_id: str, body: ProposedCorrection):
+        with lock:
+            item = session(session_id)
+            service.recording(item)
+            rule = next((rule for rule in item.work_map.rules if rule.id == body.rule_id), None)
+            if rule is None or not body.reason.strip():
+                raise DomainError("A supported rule and exact expert words are required")
+            rule = rule.model_copy(deep=True)
+            version, revision, mode = item.work_map.version, item.recording_revision, item.mode
+        if body.structured is not None:
+            extraction = CorrectionExtraction(
+                status="ready",
+                message="Explicit structured edit; review the diff.",
+                clarification=None,
+                **body.structured.model_dump(),
+            )
+            extraction_mode = "structured"
+        elif mode == "simulated":
+            extraction = simulated_extraction(body.reason)
+            extraction_mode = "simulated"
+        else:
+            try:
+                extraction = await providers.extract_correction(body.reason, rule.model_dump())
+            except ProviderConfigurationError as error:
+                raise HTTPException(503, str(error)) from error
+            except Exception as error:
+                raise HTTPException(
+                    502, "Correction extraction failed. Retry or use structured editing."
+                ) from error
+            extraction_mode = "live"
+        with lock:
+            current = session(session_id)
+            service.recording(current)
+            current_rule = next(rule for rule in current.work_map.rules if rule.id == body.rule_id)
+            if (
+                current.recording_revision != revision
+                or current.work_map.version != version
+                or current_rule != rule
+            ):
+                raise DomainError("Recording or knowledge changed during extraction; review again")
+            event = service.event(
+                current,
+                "correction_proposed",
+                "expert",
+                {
+                    "condition": body.rule_id,
+                    "text": body.reason,
+                    "extraction_mode": extraction_mode,
+                },
+            )
+            suggestion = proposal(
+                rule, version, body.reason, extraction_mode, event.event_id, extraction
+            )
+            current.correction_proposals.append(suggestion)
+            store.save(current)
+        return {"proposal": suggestion, "session": current}
+
+    @app.post("/api/sessions/{session_id}/map/corrections/{proposal_id}/apply")
+    def apply_correction(session_id: str, proposal_id: str, body: ApplyCorrection):
+        with lock:
+            item = session(session_id)
+            service.recording(item)
+            suggestion = next(
+                (value for value in item.correction_proposals if value.id == proposal_id), None
+            )
+            if (
+                suggestion is None
+                or not body.explicit
+                or suggestion.status != "ready"
+                or suggestion.proposed_rule is None
+            ):
+                raise DomainError("A ready proposal and explicit review approval are required")
+            current_rule = next(
+                rule for rule in item.work_map.rules if rule.id == suggestion.rule_id
+            )
+            if (
+                suggestion.map_version != item.work_map.version
+                or current_rule != suggestion.before_rule
+            ):
+                raise DomainError("This correction is stale; propose and review it again")
+            service.draft_revision(item)
+            revised = suggestion.proposed_rule.model_copy(deep=True)
+            evidence = next(
+                event for event in item.events if event.event_id == suggestion.evidence_id
+            )
+            revised.evidence_ids.append(evidence.event_id)
+            revised.evidence_timestamps[evidence.event_id] = evidence.timestamp
+            item.work_map.rules = [
+                revised if rule.id == revised.id else rule for rule in item.work_map.rules
+            ]
+            suggestion.status = "applied"
+            service.event(
+                item,
+                "correction_applied",
+                "expert",
+                {"proposal_id": proposal_id, "version": item.work_map.version},
+            )
+            store.save(item)
+        return item
+
+    @app.post("/api/sessions/{session_id}/training/start")
+    def start_training(session_id: str, body: TrainingVersion):
+        with lock:
+            item = session(session_id)
+            service.recording(item)
+            service.generate_challenges(item, body.version, body.seed)
+            service.event(
+                item, "training_selected", "expert", {"version": body.version, "seed": body.seed}
+            )
             store.save(item)
         return item
 
@@ -364,10 +498,11 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
             if attempt is None:
                 raise DomainError("Record your independent first answer before requesting a hint")
             attempt.hint_used = True
-            relevant = {violation.rule_id for violation in evaluate(challenge.case)}
+            artifact = service.approved_map(item, challenge.map_version)
+            relevant = {violation.rule_id for violation in evaluate(challenge.case, artifact.rules)}
             rules = [
                 rule
-                for rule in item.work_map.rules
+                for rule in artifact.rules
                 if rule.kind in relevant and rule.status == "expert_confirmed"
             ]
             store.save(item)
@@ -381,15 +516,26 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
     def results(session_id: str):
         with lock:
             item = session(session_id)
+            active = [
+                challenge
+                for challenge in item.challenges
+                if challenge.batch_id == item.training_batch_id
+            ]
             if (
                 item.phase != "training"
-                or not item.challenges
-                or not all(challenge.approved for challenge in item.challenges)
-                or {attempt.challenge_id for attempt in item.attempts}
-                != {challenge.id for challenge in item.challenges}
+                or not active
+                or not all(challenge.approved for challenge in active)
+                or not {challenge.id for challenge in active}.issubset(
+                    {attempt.challenge_id for attempt in item.attempts}
+                )
             ):
                 raise DomainError("Attempt every approved challenge before opening results")
-            item.phase = workflow.advance(item.id, [], item.work_map.version)
+            checkpoint = workflow.graph.get_state(workflow.config(item.id)).values
+            item.phase = (
+                workflow.advance(item.id, [], item.training_map_version)
+                if checkpoint.get("phase") == "training"
+                else "results"
+            )
             store.save(item)
         return item
 
@@ -418,12 +564,13 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
             if tutor_attempt is not None:
                 tutor_attempt.hint_used = True
                 store.save(item)
+            artifact = service.approved_map(item) if body.role == "tutor" else item.work_map
             return {
                 "session_id": item.id,
                 "phase": item.phase,
-                "map_version": item.work_map.version,
-                "map_status": item.work_map.status,
-                "work_map": item.work_map,
+                "map_version": artifact.version,
+                "map_status": artifact.status,
+                "work_map": artifact,
                 "case": case,
                 "screen_content_is_untrusted_data": True,
                 "boundary": "Use only confirmed supported rules. Escalate unresolved situations "

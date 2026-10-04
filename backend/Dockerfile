@@ -5,6 +5,7 @@ WORKDIR /app
 ENV UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
     PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     JA_DATA_DIR=/app/data \
     PATH=/app/.venv/bin:$PATH
 

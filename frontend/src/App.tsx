@@ -288,6 +288,11 @@ export function App() {
                           Start live session
                         </Button>
                       </div>
+                      <p className="muted">
+                        The apprentice asks about expert decisions and tutors
+                        newcomers with reviewed evidence. Demo audio uses your
+                        browser voice.
+                      </p>
                       <p className="hero-note">
                         Synthetic cases · Fictional company policies · No paid
                         keys needed for the demo
@@ -311,7 +316,7 @@ export function App() {
                         <span>
                           <small>02 · VERIFY</small>
                           <strong>“Yes. That’s what I meant.”</strong>
-                          <p>Explicit confirmation, no guessed rules</p>
+                          <p>Expert review before rules are taught</p>
                         </span>
                       </div>
                       <div className="diagram-line" />
@@ -339,7 +344,11 @@ export function App() {
                     <div className="card stat">
                       <span>Unseen challenges</span>
                       <strong>2</strong>
-                      <p>Expert-approved practice and assessment</p>
+                      <p>
+                        {session
+                          ? `${session.challenges.filter((c) => c.batch_id === session.training_batch_id && c.approved).length}/2 selected challenges approved`
+                          : "Expert review required before practice and assessment"}
+                      </p>
                     </div>
                   </div>
                   <section className="card">
@@ -406,7 +415,8 @@ export function App() {
                   <div className="session-controls">
                     <span className="muted">
                       Session {session.id.slice(0, 8)} · Work Map v
-                      {session.work_map.version}
+                      {session.work_map.version} ({session.work_map.status}) ·
+                      Training v{session.training_map_version ?? "not selected"}
                     </span>
                     <div className="row">
                       <Button
@@ -469,21 +479,45 @@ export function App() {
                       onSession={onSession}
                       onError={onError}
                       onConfirm={confirm}
+                      onNavigate={setPage}
                     />
                   )}
                   {page === "map" && (
                     <>
                       <KnowledgeMap
                         session={session}
-                        busy={busy}
                         onEvidence={openEvidence}
-                        onCorrect={(rule_id, reason) =>
-                          void perform(() =>
-                            update("/map/correct", { rule_id, reason }),
-                          )
-                        }
+                        onSession={onSession}
+                        onError={onError}
                       />
-                      {session.work_map.status === "approved" && (
+                      {session.approved_maps.length > 0 && (
+                        <section className="card">
+                          <h3>Select approved training version</h3>
+                          <p>
+                            Switching is explicit. Earlier challenges and
+                            answers remain stored.
+                          </p>
+                          <div className="row wrap">
+                            {session.approved_maps.map((map) => (
+                              <Button
+                                key={map.version}
+                                variant="secondary"
+                                disabled={busy}
+                                onClick={() =>
+                                  void perform(() =>
+                                    update("/training/start", {
+                                      version: map.version,
+                                    }),
+                                  )
+                                }
+                              >
+                                Use approved v{map.version}
+                              </Button>
+                            ))}
+                          </div>
+                        </section>
+                      )}
+                      {session.training_map_version !== null && (
                         <>
                           <ChallengeApproval
                             session={session}
@@ -491,33 +525,43 @@ export function App() {
                             onApprove={(id) =>
                               void perform(() =>
                                 update(`/challenges/${id}/approve`, {
-                                  version: session.work_map.version,
+                                  version: session.training_map_version,
                                   explicit: true,
                                 }),
                               )
                             }
                           />
                           <Button
-                            disabled={session.challenges.some(
-                              (c) => !c.approved,
-                            )}
+                            disabled={session.challenges
+                              .filter(
+                                (c) => c.batch_id === session.training_batch_id,
+                              )
+                              .some((c) => !c.approved)}
                             onClick={() => setPage("training")}
                           >
                             Begin training <ArrowRight size={16} />
                           </Button>
                         </>
                       )}
-                      {session.phase === "awaiting_confirmation" && (
+                      {session.map_review_ready && (
                         <Button disabled={busy} onClick={confirm}>
                           Confirm this map
                         </Button>
                       )}
-                      {session.phase === "debrief" && (
+                      {session.work_map.status === "draft" && (
                         <Button
                           variant="secondary"
-                          onClick={() => setPage("debrief")}
+                          onClick={() =>
+                            setPage(
+                              session.phase === "capture"
+                                ? "expert"
+                                : "debrief",
+                            )
+                          }
                         >
-                          Return to debrief for confirmation
+                          {session.phase === "capture"
+                            ? "Return to Expert workspace"
+                            : "Return to debrief for confirmation"}
                         </Button>
                       )}
                     </>
@@ -529,6 +573,15 @@ export function App() {
                         onSession={onSession}
                         onError={onError}
                         onEvidence={openEvidence}
+                        onMap={() =>
+                          setPage(
+                            session.phase === "capture"
+                              ? "expert"
+                              : session.work_map.status === "draft"
+                                ? "debrief"
+                                : "map",
+                          )
+                        }
                         onResults={() =>
                           void perform(async () => {
                             await update("/results");
@@ -579,16 +632,19 @@ export function App() {
                             </p>
                             <p className="muted">
                               Assessed checks:{" "}
-                              {session.challenges.find(
-                                (c) => c.id === attempt.challenge_id,
-                              )?.assessment
-                                ? "test coverage and independent review"
-                                : "report version matching"}
+                              {attempt.assessed_skills.join(", ") ||
+                                "No checks demonstrated"}
                               .
                             </p>
                           </article>
                         ))
                       )}
+                      <Button
+                        variant="secondary"
+                        onClick={() => setPage("training")}
+                      >
+                        Open training
+                      </Button>
                       <p className="notice">
                         These results describe the assessed cases. They do not
                         establish mastery, certification, or standards

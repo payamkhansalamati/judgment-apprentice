@@ -29,6 +29,10 @@ export interface Rule {
   kind: string;
   status: "observed" | "expert_confirmed" | "unresolved";
   reason: string;
+  parameters: {
+    required_test_scope: string[];
+    failure_decision: "Hold" | "Escalate";
+  };
   evidence_ids: string[];
   guardrails: string[];
   screen_evidence_ids: string[];
@@ -52,6 +56,13 @@ export interface Challenge {
   map_version: number;
   approved: boolean;
   assessment: boolean;
+  source_rule_id: string;
+  source_evidence_ids: string[];
+  expected_violations: string[];
+  accepted_decisions: Decision[];
+  template_id: string;
+  generation_seed: number;
+  batch_id: string;
 }
 export interface Attempt {
   challenge_id: string;
@@ -76,6 +87,11 @@ export interface Session {
   work_map: WorkMap;
   challenges: Challenge[];
   attempts: Attempt[];
+  approved_maps: WorkMap[];
+  correction_proposals: CorrectionProposal[];
+  training_map_version: number | null;
+  training_batch_id: string | null;
+  map_review_ready: boolean;
   known_conditions: string[];
   asked_questions: string[];
 }
@@ -88,4 +104,19 @@ export interface Violation {
   rule_id: string;
   explanation: string;
   evidence_ids: string[];
+}
+
+export interface CorrectionProposal {
+  id: string;
+  rule_id: string;
+  map_version: number;
+  expert_words: string;
+  mode: "simulated" | "live" | "structured";
+  status: "ready" | "ambiguous" | "unsupported" | "contradiction" | "applied";
+  message: string;
+  clarification: string | null;
+  before_rule: Rule;
+  proposed_rule: Rule | null;
+  changes: string[];
+  evidence_id: string;
 }

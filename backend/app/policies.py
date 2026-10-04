@@ -1,6 +1,6 @@
 """Fictional company policies; never execute generated expressions or code."""
 
-from .contracts import Case, Violation
+from .contracts import Case, Rule, Violation
 
 SUPPORTED_RULES = {"version_match", "coverage", "independent_review"}
 SKILL_LABELS = {
@@ -12,7 +12,7 @@ SKILL_LABELS = {
 }
 
 
-def evaluate(case: Case) -> list[Violation]:
+def evaluate(case: Case, rules: list[Rule] | None = None) -> list[Violation]:
     """Baseline sandbox checks apply even before an expert approves captured knowledge."""
     violations: list[Violation] = []
     required_strings = [case.software_version, case.report_version, case.author, case.reviewer]
@@ -33,8 +33,14 @@ def evaluate(case: Case) -> list[Violation]:
                 explanation="The test report covers an older or different version.",
             )
         )
+    additional = {
+        value.strip()
+        for rule in (rules or [])
+        if rule.kind == "coverage"
+        for value in rule.parameters.required_test_scope
+    }
     missing = sorted(
-        {value.strip() for value in case.functionality}
+        ({value.strip() for value in case.functionality} | additional)
         - {value.strip() for value in case.test_scope}
     )
     if missing:
@@ -55,7 +61,9 @@ def evaluate(case: Case) -> list[Violation]:
     return violations
 
 
-def explanation_skills(case: Case, reason: str) -> tuple[list[str], list[str]]:
+def explanation_skills(
+    case: Case, reason: str, rules: list[Rule] | None = None
+) -> tuple[list[str], list[str]]:
     """Small visible English rubric, not a general natural-language or mastery evaluator.
 
     Recognize the concepts exercised by a controlled case. This deliberately conservative
@@ -103,6 +111,11 @@ def explanation_skills(case: Case, reason: str) -> tuple[list[str], list[str]]:
             word in text
             for word in ["feature", "function", "change", "cover"]
             + [value.casefold() for value in case.functionality]
+            + [
+                value.casefold()
+                for rule in (rules or [])
+                for value in rule.parameters.required_test_scope
+            ]
         ),
         "independent_review": any(word in text for word in ["review", "independent"])
         and any(word in text for word in ["author", "same", "self", "own"])
@@ -124,7 +137,7 @@ def explanation_skills(case: Case, reason: str) -> tuple[list[str], list[str]]:
         "test_results": "test" in text
         and any(word in text for word in ["fail", "pass", "unknown"]),
     }
-    required = [violation.rule_id for violation in evaluate(case)] or sorted(SUPPORTED_RULES)
+    required = [violation.rule_id for violation in evaluate(case, rules)] or sorted(SUPPORTED_RULES)
     demonstrated = [skill for skill in required if checks.get(skill, False)]
     missing = [skill for skill in required if skill not in demonstrated]
     return demonstrated, missing

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MonitorUp, Pause, Play, ShieldCheck, Sparkles } from "lucide-react";
+import { cancelDemoAudio, speakDemo, useDemoAudio } from "../demoAudio";
+import { QuestionScheduler } from "../questionScheduler";
+import type { Eligibility, Cue } from "../questionScheduler";
 import { api } from "../api";
 import type { Decision, Session } from "../contracts";
 import { useScreenCapture } from "../useScreenCapture";
@@ -8,8 +11,6 @@ import { CaseCard } from "./CaseCard";
 import { Timeline } from "./Timeline";
 import { Button } from "./ui/button";
 
-const QUESTION_COOLDOWN = 8_000;
-const ACTIVITY_SETTLE = 4_000;
 export function ExpertWorkspace({
   session,
   onSession,
@@ -23,6 +24,7 @@ export function ExpertWorkspace({
   onEvidence: (id: string) => void;
   onDebrief: () => void;
 }) {
+  const demoAudio = useDemoAudio();
   const [caseId, setCaseId] = useState("B");
   const [question, setQuestion] = useState<{ id: string; text: string }>();
   const [typed, setTyped] = useState("");
@@ -36,9 +38,17 @@ export function ExpertWorkspace({
   const [maskEnabled, setMaskEnabled] = useState(true);
   const [maskHeight, setMaskHeight] = useState(0.16);
   const activity = useRef(Date.now());
-  const lastAsked = useRef(0);
+  const [automatic, setAutomatic] = useState(false);
+  const scheduler = useRef(new QuestionScheduler());
+  const generation = useRef(0);
+  const latestState = useRef<Eligibility>(null!);
+  const abort = useRef<AbortController | null>(null);
+  const agentSpeaking = useRef(false);
+
   const inFlight = useRef(false);
   const voiceSpeaking = useRef(false);
+  const userSpeaking = useRef(false);
+  const sharedBefore = useRef(false);
   const mounted = useRef(true);
   const activeCase =
     session.cases.find((c) => c.id === caseId) ?? session.cases[0];
@@ -53,7 +63,7 @@ export function ExpertWorkspace({
     mounted.current = true;
     return () => {
       mounted.current = false;
-      speechSynthesis.cancel();
+      cancelDemoAudio();
     };
   }, []);
   const run = async (task: () => Promise<void>) => {
@@ -68,90 +78,242 @@ export function ExpertWorkspace({
   };
   const speak = (text: string) => {
     if (session.mode === "simulated" && !paused && !session.off_record) {
-      speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.onend = () => {
-        activity.current = Date.now();
-      };
-      speechSynthesis.speak(utterance);
+      agentSpeaking.current = speakDemo(text, () => {
+        agentSpeaking.current = false;
+        scheduler.current.activity();
+      });
     }
   };
-  const ask = useCallback(async () => {
-    if (inFlight.current || paused || session.off_record || !session.consent)
-      return;
-    inFlight.current = true;
-    try {
-      const result = await api<{ question: string; session: Session }>(
-        `/sessions/${session.id}/questions`,
-        {},
-      );
-      if (!mounted.current) return;
-      onSession(result.session);
-      const event = result.session.events
-        .filter((e) => e.event_type === "question")
-        .at(-1);
-      setQuestion({
-        id: event?.event_id ?? String(Date.now()),
-        text: result.question,
-      });
-      const caseForCondition: Record<string, string> = {
-        version_match: "B",
-        coverage: "C",
-        independent_review: "A",
-      };
-      if (event && typeof event.payload.condition === "string")
-        setCaseId(caseForCondition[event.payload.condition] ?? "B");
-      setQueued(false);
-      lastAsked.current = Date.now();
-      if (session.mode === "simulated") {
-        const utterance = new SpeechSynthesisUtterance(result.question);
-        utterance.onend = () => {
-          activity.current = Date.now();
-        };
-        speechSynthesis.speak(utterance);
-      }
-    } catch (error) {
-      onError(error instanceof Error ? error.message : "Question unavailable");
-      setQueued(false);
-    } finally {
-      inFlight.current = false;
-    }
-  }, [
-    session.id,
-    session.mode,
-    session.consent,
-    session.off_record,
-    paused,
-    onSession,
-    onError,
-  ]);
-  useEffect(() => {
-    if (!queued) return;
-    const timer = window.setInterval(() => {
-      const now = Date.now();
-      if (
-        now - activity.current >= ACTIVITY_SETTLE &&
-        now - lastAsked.current >= QUESTION_COOLDOWN &&
-        (!capture.active || capture.stability) &&
-        !speechSynthesis.speaking &&
-        !voiceSpeaking.current
-      )
-        void ask();
-    }, 500);
-    return () => clearInterval(timer);
-  }, [queued, capture.active, capture.stability, ask]);
-  useEffect(() => {
-    if (session.off_record || paused) {
-      speechSynthesis.cancel();
-      setQueued(false);
-    }
-  }, [session.off_record, paused]);
-  const onActivity = useCallback(() => {
-    activity.current = Date.now();
-  }, []);
   const condition = session.asked_questions.find(
     (id) => !session.known_conditions.includes(id),
   );
+  latestState.current = {
+    active: automatic,
+    consent: session.consent,
+    paused,
+    offRecord: session.off_record,
+    capturePhase: session.phase === "capture",
+    userSpeaking: userSpeaking.current,
+    agentSpeaking:
+      voiceSpeaking.current ||
+      agentSpeaking.current ||
+      (window.speechSynthesis?.speaking ?? false),
+    stable: !capture.active || capture.stability,
+    pending: Boolean(condition) || inFlight.current,
+    known: session.known_conditions,
+  };
+  const cancelQuestions = useCallback(() => {
+    generation.current++;
+    abort.current?.abort();
+    scheduler.current.cancel();
+    setQueued(false);
+    setQuestion(undefined);
+    cancelDemoAudio();
+    agentSpeaking.current = false;
+  }, []);
+  useEffect(() => {
+    if (sharedBefore.current && !capture.active) {
+      cancelQuestions();
+      setAutomatic(false);
+    }
+    sharedBefore.current = capture.active;
+  }, [capture.active, cancelQuestions]);
+  useEffect(() => {
+    if (!automatic || paused || session.off_record || !session.consent) {
+      cancelQuestions();
+      return;
+    }
+    const cases: Record<string, string> = {
+      version_match: "B",
+      coverage: "C",
+      independent_review: "A",
+    };
+    for (const event of session.events.filter((e) =>
+      ["sandbox_decision", "sandbox_case_snapshot"].includes(e.event_type),
+    )) {
+      const key =
+        event.payload.case_id === "B"
+          ? "version_match"
+          : event.payload.case_id === "C"
+            ? "coverage"
+            : "independent_review";
+      if (!session.known_conditions.includes(key))
+        scheduler.current.enqueue({
+          id: event.event_id,
+          condition: key,
+          caseId: String(event.payload.case_id),
+          priority:
+            event.payload.decision === "Escalate"
+              ? 0
+              : event.event_type === "sandbox_decision"
+                ? 1
+                : 2,
+        });
+    }
+    for (const key of Object.keys(cases))
+      if (!session.known_conditions.includes(key))
+        scheduler.current.enqueue({
+          id: `guardrail-${key}`,
+          condition: key,
+          caseId: cases[key],
+          priority: 3,
+        });
+    setQueued(
+      !condition &&
+        session.known_conditions.length < 3 &&
+        scheduler.current.size > 0,
+    );
+  }, [
+    automatic,
+    paused,
+    session.off_record,
+    session.consent,
+    session.events,
+    session.known_conditions,
+    condition,
+    cancelQuestions,
+  ]);
+  const ask = useCallback(
+    async (manual = false) => {
+      const state = {
+        ...latestState.current,
+        userSpeaking: userSpeaking.current,
+        agentSpeaking:
+          voiceSpeaking.current ||
+          agentSpeaking.current ||
+          (window.speechSynthesis?.speaking ?? false),
+        pending: latestState.current.pending || inFlight.current,
+      };
+      if (!scheduler.current.eligible(state, manual)) return;
+      let cue: Cue | undefined;
+      if (manual) {
+        const key = ["version_match", "coverage", "independent_review"].find(
+          (key) => !state.known.includes(key),
+        );
+        if (!key) return;
+        cue = {
+          id: `manual-${key}`,
+          condition: key,
+          caseId: (
+            {
+              version_match: "B",
+              coverage: "C",
+              independent_review: "A",
+            } as Record<string, string>
+          )[key],
+          priority: 0,
+          created: Date.now(),
+        };
+      } else cue = scheduler.current.next(state);
+      if (
+        !cue ||
+        !scheduler.current.eligible(
+          {
+            ...latestState.current,
+            pending: inFlight.current || latestState.current.pending,
+          },
+          manual,
+        )
+      )
+        return;
+      const revision = generation.current;
+      inFlight.current = true;
+      const controller = new AbortController();
+      abort.current = controller;
+      try {
+        const response = await fetch(`/api/sessions/${session.id}/questions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            condition: cue.condition,
+            case_id: cue.caseId,
+          }),
+          signal: controller.signal,
+        });
+        const result = (await response.json()) as {
+          question: string;
+          session: Session;
+          detail?: string;
+        };
+        if (!response.ok)
+          throw new Error(result.detail || "Question unavailable");
+        if (
+          !mounted.current ||
+          revision !== generation.current ||
+          controller.signal.aborted
+        )
+          return;
+        onSession(result.session);
+        // Recheck controls and speech immediately before delivering audio.
+        const current = latestState.current;
+        if (
+          !current.consent ||
+          current.offRecord ||
+          current.paused ||
+          (!manual && !current.active)
+        )
+          return;
+        const event = result.session.events
+          .filter((e) => e.event_type === "question")
+          .at(-1);
+        setQuestion({ id: event?.event_id ?? cue.id, text: result.question });
+        setCaseId(cue.caseId);
+        setQueued(false);
+        if (
+          session.mode === "simulated" &&
+          scheduler.current.eligible(
+            {
+              ...latestState.current,
+              pending: false,
+              userSpeaking: userSpeaking.current,
+              agentSpeaking:
+                voiceSpeaking.current ||
+                (window.speechSynthesis?.speaking ?? false),
+            },
+            manual,
+          )
+        ) {
+          agentSpeaking.current = speakDemo(result.question, () => {
+            agentSpeaking.current = false;
+            scheduler.current.activity();
+          });
+        }
+        scheduler.current.delivered();
+      } catch (error) {
+        if (!controller.signal.aborted)
+          onError(
+            error instanceof Error ? error.message : "Question unavailable",
+          );
+      } finally {
+        inFlight.current = false;
+        // An aborted browser request may already have committed a question. Recover it
+        // as text on the next session update; the server prevents duplicate delivery.
+        if (controller.signal.aborted && mounted.current) {
+          try {
+            onSession(await api<Session>(`/sessions/${session.id}`));
+          } catch {
+            /* Retry via session refresh. */
+          }
+        }
+      }
+    },
+    [session.id, session.mode, onSession, onError],
+  );
+  useEffect(() => {
+    const timer = window.setInterval(() => void ask(false), 500);
+    return () => clearInterval(timer);
+  }, [ask]);
+  useEffect(
+    () => () => {
+      generation.current++;
+      abort.current?.abort();
+    },
+    [],
+  );
+  const onActivity = useCallback(() => {
+    activity.current = Date.now();
+    scheduler.current.activity();
+  }, []);
   const latest = session.events
     .filter((event) => event.event_type === "expert_answer")
     .at(-1);
@@ -199,7 +361,9 @@ export function ExpertWorkspace({
       <section className="card consent">
         <h3>
           {session.consent
-            ? "Recording consent given"
+            ? session.off_record
+              ? "Consent given · currently off record"
+              : "Consent given · capture controls available"
             : "Start with explicit consent"}
         </h3>
         <p>
@@ -245,12 +409,7 @@ export function ExpertWorkspace({
                   setCaseId(c.id);
                 }}
               >
-                {c.id} ·{" "}
-                {c.id === "A"
-                  ? "Complete checks"
-                  : c.id === "B"
-                    ? "Older report"
-                    : "Missing coverage"}
+                Case {c.id}
               </Button>
             ))}
           </div>
@@ -288,7 +447,9 @@ export function ExpertWorkspace({
               </label>
             </div>
             <Button
-              disabled={busy || !reason.trim()}
+              disabled={
+                busy || !reason.trim() || session.off_record || !session.consent
+              }
               onClick={() =>
                 void run(async () => {
                   const result = await api<{ session: Session }>(
@@ -339,7 +500,11 @@ export function ExpertWorkspace({
               <Button
                 variant="ghost"
                 disabled={!capture.active}
-                onClick={capture.stop}
+                onClick={() => {
+                  cancelQuestions();
+                  setAutomatic(false);
+                  capture.stop();
+                }}
               >
                 Stop sharing
               </Button>
@@ -388,7 +553,14 @@ export function ExpertWorkspace({
             </p>
             <div className="conversation-bubble">
               {question?.text ??
-                "All tests passed. So why did the expert stop the release?"}
+                (condition
+                  ? String(
+                      session.events
+                        .filter((e) => e.event_type === "question")
+                        .at(-1)?.payload.question,
+                    )
+                  : undefined) ??
+                "Review a case and save your decision. Start capture for automatic questions, or choose Ask now."}
             </div>
             {latest && (
               <div className="expert-bubble">
@@ -402,15 +574,26 @@ export function ExpertWorkspace({
             )}
             <div className="row wrap">
               <Button
+                variant="secondary"
+                disabled={!session.consent || session.off_record || paused}
+                onClick={() => {
+                  cancelQuestions();
+                  setAutomatic((value) => !value);
+                }}
+              >
+                {automatic ? "Stop capture" : "Start capture"}
+              </Button>
+              <Button
                 disabled={
                   busy ||
                   !session.consent ||
                   session.off_record ||
                   paused ||
                   Boolean(condition) ||
+                  demoAudio.speaking ||
                   session.known_conditions.length === 3
                 }
-                onClick={() => void ask()}
+                onClick={() => void ask(true)}
               >
                 Ask now
               </Button>
@@ -424,20 +607,27 @@ export function ExpertWorkspace({
                 }
                 onClick={() => {
                   onActivity();
-                  setQueued(true);
+                  scheduler.current.activity();
+                  setQueued(scheduler.current.size > 0);
                 }}
               >
                 Let me finish
               </Button>
-              <Button variant="ghost" onClick={() => setPaused((p) => !p)}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  cancelQuestions();
+                  setPaused((p) => !p);
+                }}
+              >
                 {paused ? <Play size={14} /> : <Pause size={14} />}{" "}
                 {paused ? "Resume" : "Pause"}
               </Button>
             </div>
-            {queued && (
+            {queued && !condition && (
               <p className="notice" role="status">
-                Question queued. Waiting for in-app activity to settle and the
-                screen to stabilize.
+                Question queued. Waiting for activity, speech, and the screen to
+                settle. These cues do not prove reading is finished.
               </p>
             )}
             <label className="field">
@@ -465,7 +655,13 @@ export function ExpertWorkspace({
               {session.mode === "simulated" && (
                 <Button
                   variant="secondary"
-                  disabled={busy || !condition || session.off_record || paused}
+                  disabled={
+                    busy ||
+                    !condition ||
+                    session.off_record ||
+                    !session.consent ||
+                    paused
+                  }
                   onClick={() => void run(() => recordAnswer(true))}
                 >
                   Play scripted answer
@@ -473,12 +669,33 @@ export function ExpertWorkspace({
               )}
             </div>
             <p className="muted">
+              {!session.consent
+                ? "Next: give consent above."
+                : session.off_record
+                  ? "Next: resume recording."
+                  : condition
+                    ? "Next: record an expert answer."
+                    : session.known_conditions.length === 3
+                      ? "Next: start debrief."
+                      : automatic
+                        ? "Next: review a case; the interviewer waits for a quiet moment."
+                        : "Next: start capture for automatic questions, or Ask now."}
+            </p>
+            <p className="muted">
               {session.known_conditions.length}/3 conditions explained ·
               Questions are never repeated after an answer.
             </p>
           </section>
           <VoiceCompanion
             sessionId={session.id}
+            consent={session.consent}
+            captureActive={automatic}
+            pendingAnswer={Boolean(condition)}
+            replayText={String(
+              session.events
+                .filter((event) => event.event_type === "question")
+                .at(-1)?.payload.question ?? "",
+            )}
             sessionMode={session.mode}
             role="interviewer"
             offRecord={session.off_record || !session.consent}
@@ -490,6 +707,10 @@ export function ExpertWorkspace({
               map: session.work_map,
             })}
             onActivity={onActivity}
+            onUserSpeakingChange={(speaking) => {
+              userSpeaking.current = speaking;
+              if (speaking) onActivity();
+            }}
             onSpeakingChange={(speaking) => {
               voiceSpeaking.current = speaking;
             }}

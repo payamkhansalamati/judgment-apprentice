@@ -1,10 +1,14 @@
 import { defineConfig, devices } from "@playwright/test";
+const backendPort = process.env.JA_E2E_BACKEND_PORT ?? "8000";
+const frontendPort = process.env.JA_E2E_FRONTEND_PORT ?? "5173";
+const backendUrl = `http://127.0.0.1:${backendPort}`;
+const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
   workers: 1,
   timeout: 45_000,
-  use: { baseURL: "http://127.0.0.1:5173", trace: "retain-on-failure" },
+  use: { baseURL: frontendUrl, trace: "retain-on-failure" },
   projects: [
     {
       name: "chromium",
@@ -16,17 +20,23 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command:
-        "uv run uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000",
+      command: `uv run uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port ${backendPort}`,
       cwd: "..",
-      url: "http://127.0.0.1:8000/ready",
-      env: { JA_DATA_DIR: "data/e2e" },
+      url: `${backendUrl}/ready`,
+      env: {
+        JA_DATA_DIR: "data/e2e",
+        OPENAI_API_KEY: "",
+        ELEVENLABS_API_KEY: "",
+        ELEVENLABS_INTERVIEWER_AGENT_ID: "",
+        ELEVENLABS_TUTOR_AGENT_ID: "",
+      },
       reuseExistingServer: false,
       timeout: 60_000,
     },
     {
-      command: "npm run dev -- --host 127.0.0.1 --port 5173",
-      url: "http://127.0.0.1:5173",
+      command: `npm run dev -- --host 127.0.0.1 --port ${frontendPort} --strictPort`,
+      url: frontendUrl,
+      env: { JA_BACKEND_URL: backendUrl },
       reuseExistingServer: false,
       timeout: 60_000,
     },

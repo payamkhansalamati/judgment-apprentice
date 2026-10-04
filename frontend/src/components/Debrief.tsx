@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Session } from "../contracts";
 import { api } from "../api";
+import { CorrectionEditor } from "./CorrectionEditor";
 import { Button } from "./ui/button";
 const questions: Record<string, string> = {
   exceptions: "Are there exceptions to these checks?",
@@ -12,14 +13,15 @@ export function Debrief({
   onSession,
   onError,
   onConfirm,
+  onNavigate,
 }: {
   session: Session;
   onSession: (value: Session) => void;
   onError: (message: string) => void;
   onConfirm: () => void;
+  onNavigate: (page: "expert" | "map") => void;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [correction, setCorrection] = useState("");
   const [busy, setBusy] = useState(false);
   const run = async (task: () => Promise<Session>) => {
     setBusy(true);
@@ -40,6 +42,9 @@ export function Debrief({
         <p>
           Ask and answer the three capture questions in the Expert workspace.
         </p>
+        <Button onClick={() => onNavigate("expert")}>
+          Open expert workspace
+        </Button>
       </section>
     );
   if (session.work_map.status === "approved")
@@ -50,6 +55,9 @@ export function Debrief({
           Work Map v{session.work_map.version} is approved. Inspect its evidence
           and approve training challenges in the Work Map.
         </p>
+        <Button onClick={() => onNavigate("map")}>
+          Open Work Map and challenges
+        </Button>
       </section>
     );
   return (
@@ -136,27 +144,14 @@ export function Debrief({
               {session.work_map.rules.find((rule) => rule.id === "coverage")
                 ?.reason || "No coverage reasoning captured yet."}
             </blockquote>
-            <label className="field">
-              Correction in the expert’s words
-              <textarea
-                value={correction}
-                onChange={(e) => setCorrection(e.target.value)}
-                placeholder="Only if tests cover every changed functionality…"
-              />
-            </label>
-            <Button
-              disabled={busy || !correction.trim() || session.off_record}
-              onClick={() =>
-                void run(() =>
-                  api<Session>(`/sessions/${session.id}/map/correct`, {
-                    rule_id: "coverage",
-                    reason: correction,
-                  }),
-                )
-              }
-            >
-              Save expert correction
-            </Button>
+            <CorrectionEditor
+              session={session}
+              rule={session.work_map.rules.find(
+                (rule) => rule.id === "coverage",
+              )!}
+              onSession={onSession}
+              onError={onError}
+            />
           </section>
           <section className="card teach-back">
             <span className="eyebrow">
@@ -166,6 +161,11 @@ export function Debrief({
             {session.work_map.rules.map((rule) => (
               <p key={rule.id}>
                 <strong>{rule.title}:</strong> {rule.reason}
+                <br />
+                Required extra tests:{" "}
+                {rule.parameters.required_test_scope.join(", ") || "None"}.
+                Failure action: {rule.parameters.failure_decision}. Owner:{" "}
+                {rule.escalation_owner}
               </p>
             ))}
             <p>
@@ -173,7 +173,7 @@ export function Debrief({
               {session.work_map.answers.missing ||
                 "Unresolved — ask the expert."}
             </p>
-            {session.phase === "debrief" ? (
+            {!session.map_review_ready ? (
               <Button
                 disabled={
                   busy || session.work_map.gaps.length > 0 || session.off_record
@@ -189,9 +189,7 @@ export function Debrief({
             ) : (
               <Button
                 disabled={
-                  busy ||
-                  session.phase !== "awaiting_confirmation" ||
-                  session.off_record
+                  busy || !session.map_review_ready || session.off_record
                 }
                 onClick={onConfirm}
               >

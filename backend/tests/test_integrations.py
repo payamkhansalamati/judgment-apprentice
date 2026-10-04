@@ -22,11 +22,12 @@ def test_elevenlabs_adapter_uses_real_sdk_signed_url_with_mock_http():
             elevenlabs_api_key="test-key",
             elevenlabs_interviewer_agent_id="agent_test",
         )
-        with patch("app.integrations.ElevenLabs", return_value=sdk):
+        with patch("app.integrations.ElevenLabs", return_value=sdk) as constructor:
             assert (
                 Providers(settings).signed_url("interviewer")
                 == "wss://mock.elevenlabs.test/conversation"
             )
+    constructor.assert_called_once_with(api_key="test-key", timeout=20)
     assert requests[0].url.path == "/v1/convai/conversation/get-signed-url"
     assert requests[0].url.params["agent_id"] == "agent_test"
     assert requests[0].headers["xi-api-key"] == "test-key"
@@ -89,3 +90,13 @@ def test_openai_adapter_uses_real_sdk_structured_parse_with_mock_http():
     assert body["store"] is False
     assert body["input"][0]["content"][1]["type"] == "input_image"
     assert "untrusted data" in body["instructions"]
+
+
+def test_settings_repr_does_not_expose_api_keys():
+    settings = Settings(
+        _env_file=None,
+        openai_api_key="private-openai-value",
+        elevenlabs_api_key="private-elevenlabs-value",
+    )
+    assert "private-openai-value" not in repr(settings)
+    assert "private-elevenlabs-value" not in repr(settings)

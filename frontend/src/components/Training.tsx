@@ -29,27 +29,39 @@ export function ChallengeApproval({
         Expected decisions come from confirmed checks and the fictional sandbox
         policies.
       </p>
-      {session.challenges.map((challenge) => (
-        <div className="challenge-approval" key={challenge.id}>
-          <div>
-            <strong>{challenge.case.title}</strong>
-            <p className="muted">
-              Map v{challenge.map_version} · Expected: {challenge.expected} ·{" "}
-              {challenge.case.functionality.join(", ")} · Report{" "}
-              {challenge.case.report_version} / release{" "}
-              {challenge.case.software_version} · Reviewer:{" "}
-              {challenge.case.reviewer}
-            </p>
+      {session.challenges
+        .filter((c) => c.batch_id === session.training_batch_id)
+        .map((challenge) => (
+          <div className="challenge-approval" key={challenge.id}>
+            <div>
+              <strong>{challenge.case.title}</strong>
+              <p className="muted">
+                Map v{challenge.map_version} · Expected: {challenge.expected} ·{" "}
+                {challenge.case.functionality.join(", ")} · Report{" "}
+                {challenge.case.report_version} / release{" "}
+                {challenge.case.software_version} · Reviewer:{" "}
+                {challenge.case.reviewer}
+              </p>
+              <p className="muted">
+                Source: {challenge.source_rule_id} · {challenge.template_id} ·
+                Seed {challenge.generation_seed} · Violations:{" "}
+                {challenge.expected_violations.join(", ")}
+              </p>
+              <p className="muted">
+                Test scope: {challenge.case.test_scope.join(", ")} · Accepted
+                safe decisions: {challenge.accepted_decisions.join(" / ")} ·
+                Evidence: {challenge.source_evidence_ids.length} stored moments
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              disabled={busy || challenge.approved}
+              onClick={() => onApprove(challenge.id)}
+            >
+              {challenge.approved ? "Expert approved" : "Approve challenge"}
+            </Button>
           </div>
-          <Button
-            variant="secondary"
-            disabled={busy || challenge.approved}
-            onClick={() => onApprove(challenge.id)}
-          >
-            {challenge.approved ? "Expert approved" : "Approve challenge"}
-          </Button>
-        </div>
-      ))}
+        ))}
     </section>
   );
 }
@@ -148,14 +160,27 @@ function LearnerCase({
           </label>
           <div className="row wrap">
             <Button
-              disabled={busy || !reason.trim()}
+              disabled={
+                busy ||
+                !reason.trim() ||
+                !session.consent ||
+                session.off_record ||
+                session.phase !== "training"
+              }
               onClick={() => void answer()}
             >
               {attempt ? "Save corrected answer" : "Save first answer"}
             </Button>
             <Button
               variant="secondary"
-              disabled={busy || !attempt || challenge.assessment}
+              disabled={
+                busy ||
+                !attempt ||
+                challenge.assessment ||
+                !session.consent ||
+                session.off_record ||
+                session.phase !== "training"
+              }
               onClick={() => void hint()}
             >
               Ask for expert evidence
@@ -222,17 +247,21 @@ export function Training({
   onEvidence,
   onError,
   onResults,
+  onMap,
 }: {
   session: Session;
   onSession: (session: Session) => void;
   onEvidence: (id: string) => void;
   onError: (message: string) => void;
   onResults: () => void;
+  onMap: () => void;
 }) {
-  const [selected, setSelected] = useState(session.challenges[0]?.id ?? "");
-  const challenge =
-    session.challenges.find((c) => c.id === selected) ?? session.challenges[0];
-  if (!challenge || session.challenges.some((c) => !c.approved))
+  const active = session.challenges.filter(
+    (c) => c.batch_id === session.training_batch_id,
+  );
+  const [selected, setSelected] = useState(active[0]?.id ?? "");
+  const challenge = active.find((c) => c.id === selected) ?? active[0];
+  if (!challenge || active.some((c) => !c.approved))
     return (
       <section className="card">
         <h2>Training starts with expert approval</h2>
@@ -240,6 +269,20 @@ export function Training({
           Confirm the Work Map and approve both controlled challenge variations
           in the Work Map area.
         </p>
+        <p className="muted">
+          {session.phase === "capture"
+            ? `${3 - session.known_conditions.length} expert conditions remain to explain, then debrief and confirmation.`
+            : session.work_map.status === "draft"
+              ? `${session.work_map.gaps.length} debrief gaps remain; review and confirm the draft.`
+              : `${active.filter((c) => !c.approved).length} selected challenges still need expert approval.`}
+        </p>
+        <Button onClick={onMap}>
+          {session.phase === "capture"
+            ? "Return to Expert workspace"
+            : session.work_map.status === "draft"
+              ? "Open debrief and confirm map"
+              : "Open Work Map and approve challenges"}
+        </Button>
       </section>
     );
   return (
@@ -253,14 +296,16 @@ export function Training({
         </div>
         <Button
           variant="secondary"
-          disabled={session.attempts.length < session.challenges.length}
+          disabled={active.some(
+            (c) => !session.attempts.some((a) => a.challenge_id === c.id),
+          )}
           onClick={onResults}
         >
           View results
         </Button>
       </div>
       <div className="case-tabs" role="group" aria-label="Training cases">
-        {session.challenges.map((c) => (
+        {active.map((c) => (
           <Button
             variant={c.id === challenge.id ? "default" : "secondary"}
             key={c.id}
@@ -285,6 +330,7 @@ export function Training({
       </p>
       <VoiceCompanion
         sessionId={session.id}
+        consent={session.consent}
         sessionMode={session.mode}
         role="tutor"
         challengeId={challenge.id}
@@ -296,7 +342,9 @@ export function Training({
           )
         }
         context={JSON.stringify({
-          map: session.work_map,
+          map: session.approved_maps.find(
+            (map) => map.version === challenge.map_version,
+          ),
           challenge_id: challenge.id,
           case: challenge.case,
           unresolved: "Escalate unknown exceptions to the release owner.",
