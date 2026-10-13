@@ -149,7 +149,7 @@ def create_app(data_dir: Path | None = None, settings: Settings | None = None) -
         origin = request.headers.get("origin")
         host = request.headers.get("host", "").split(":")[0]
         if host not in allowed_hosts:
-            return JSONResponse({"detail": "This MVP is local-only."}, status_code=403)
+            return JSONResponse({"detail": "Host is not allowed."}, status_code=403)
         if origin and origin not in allowed_origins:
             return JSONResponse({"detail": "Origin is not allowed."}, status_code=403)
         if settings.ja_public_demo:

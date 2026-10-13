@@ -43,7 +43,7 @@ Open http://127.0.0.1:5173. Keep both services bound to loopback. Existing `.env
 
 ## Status and limitations
 
-| Capability | Submission status |
+| Capability | Status |
 | --- | --- |
 | Credential-free capture → correction → confirmation → challenges → results | Implemented with controlled scripts and deterministic checks |
 | Browser demo audio | Explicit controls and speech API checks; audible output needs the Mac check above |

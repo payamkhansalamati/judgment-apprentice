@@ -1,6 +1,6 @@
 # Limitations and privacy
 
-This is a single-user local hackathon MVP using synthetic data and fictional company policies. It does not claim certification, standards compliance, or readiness for real confidential review data.
+This is a single-user local prototype using synthetic data and fictional company policies. It does not claim certification, standards compliance, or readiness for real confidential review data.
 
 ## What is simulated and what is live
 

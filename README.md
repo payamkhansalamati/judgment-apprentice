@@ -18,7 +18,7 @@ The application follows a fictional software-release review from expert explanat
 
 Expert confirmation governs policy. Model observations and generated proposals do not independently approve a rule or save a review decision. Simulated answers, browser speech, and live provider interactions are labeled separately.
 
-## Public hackathon demo on Render
+## Public simulated demo on Render
 
 Use the [single-service Render deployment](docs/RENDER.md). `Dockerfile.render` builds React and serves it through FastAPI on the same public origin. Public mode enables only the simulated journey, blocks live providers and real uploads, and isolates visitor sessions. Demo data may reset when the hosting service restarts.
 

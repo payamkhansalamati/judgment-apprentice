@@ -1,4 +1,4 @@
-# Release review — 2026-10-04
+# Release review — 2026-10-04 (verification re-run 2026-10-13)
 
 The review covered backend contracts, policy evaluation, map correction/versioning, challenge generation, persistence, provider adapters, capture/privacy boundaries, React navigation/training/audio, browser tests, dependencies, Docker configuration, and public documentation. This is a source review and reproducible local verification, not an independent security certification.
 
@@ -20,13 +20,13 @@ The correction, version-pinning, challenge approval, learner save gates, evidenc
 | Check | Actual local result |
 | --- | --- |
 | Backend Ruff, including maintenance scripts | Passed |
-| Backend pytest | **58 passed** |
+| Backend pytest | **61 passed** |
 | Frontend ESLint, Prettier, strict TypeScript | Passed |
 | Frontend production build | Passed; existing large-chunk advisory remains |
-| Playwright on installed Chrome | **11 passed** on isolated ports 18000 / 4173 |
-| Frontend locked dependency audit | No reported vulnerabilities |
-| Backend locked runtime dependency audit | No known vulnerabilities reported |
-| Publication files/history audit | Passed: **71 candidate files, 1 history commit** |
+| Playwright on installed Chrome | **11 passed, 1 skipped** (public-demo spec runs in public mode: 2 passed separately) on isolated ports 18000 / 4173 |
+| Frontend locked dependency audit (`npm audit --omit=dev`) | No reported vulnerabilities |
+| Backend locked runtime dependency audit (`pip-audit`) | No known vulnerabilities reported |
+| Publication files/history audit | Passed: working-tree files and local Git history scanned; no findings |
 | Compose schema validation | Passed against the official Compose specification |
 | Deployment smoke script | App shell, readiness, simulated session API, and WebSocket event delivery passed against the isolated Vite/backend pair |
 | Git diff whitespace check | Passed |

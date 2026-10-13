@@ -1,6 +1,6 @@
-# Challenge acceptance checklist
+# Acceptance checklist
 
-This checklist describes implementation targets and verification scope. A checkmark means a path exists in the local MVP; it does not claim that a paid service or browser permission was exercised. Final command results belong in the verification record below.
+This checklist describes implementation targets and verification scope. A checkmark means a path exists in the local prototype; it does not claim that a paid service or browser permission was exercised. Final command results belong in the verification record below.
 
 | Requirement | Local acceptance evidence | Scope / remaining check |
 | --- | --- | --- |
@@ -30,16 +30,16 @@ This checklist describes implementation targets and verification scope. A checkm
 | [ ] Real OS screen/microphone permission journey | Browser picker, deny/retry, off-record stop | Cannot be proven by headless simulated tests |
 | [ ] Local container runtime | Build and launch Compose on a Docker host | Record separately if Docker is unavailable |
 
-## Verification record — 2026-10-04
+## Verification record — re-run 2026-10-13
 
-- Backend policy/API pytest: **58 passed**, including mocked official SDK HTTP contracts and credential representation protection.
+- Backend pytest: **61 passed**, including mocked official SDK HTTP contracts and credential representation protection.
 - Backend Ruff: **passed**, including maintenance/publication scripts.
 - Frontend TypeScript, ESLint, Prettier, and production build: **passed**. Existing large dependency chunks remain an advisory.
-- Playwright: **11 passed** with installed Google Chrome, using isolated backend/frontend ports 18000 and 4173. Covers correction/confirmation/challenge training, demo audio controls, timing, and synthetic privacy races.
-- Locked frontend and backend runtime dependency audits: **no reported known vulnerabilities**.
+- Playwright: **11 passed, 1 skipped** (the public-demo spec runs only in public mode) with installed Google Chrome, using isolated backend/frontend ports 18000 and 4173. Covers correction/confirmation/challenge training, demo audio controls, timing, and synthetic privacy races.
+- Locked frontend (`npm audit --omit=dev`) and backend runtime (`pip-audit` on the exported lockfile) dependency audits: **no known vulnerabilities reported**.
 - Public file/history audit: **passed**; protected local files excluded and credential values never displayed.
-- Compose: **official schema validation passed**. Runtime remains unverified because Docker is unavailable locally; GitHub CI contains the container build/startup check.
-- Deployment smoke script: HTTP/API/WebSocket behavior passed against the isolated local app; this is not a container runtime result.
+- Compose: official schema validation passed on 2026-10-04 and was not repeated. Runtime remains unverified because Docker is unavailable locally; GitHub CI contains the container build/startup check.
+- Deployment smoke script: HTTP/API/WebSocket behavior passed against the isolated local app on 2026-10-04 and was not repeated; this is not a container runtime result.
 - Live in-app provider workflows, real microphone/screen permissions, and audible speaker output: **manual verification still required**.
 
 See [AUDIT.md](AUDIT.md) for review scope and [DEPLOYMENT.md](DEPLOYMENT.md) for supported deployment.

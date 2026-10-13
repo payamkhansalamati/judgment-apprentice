@@ -55,7 +55,7 @@ Docker is unavailable on the implementation machine; the actual image build rema
 
 ## Verification record
 
-- Relevant backend checks: **26 passed**, including ownership and live-provider refusal.
+- Relevant backend checks: the full backend suite (**61 passed** on 2026-10-13), including ownership and live-provider refusal.
 - Frontend lint, formatting, strict TypeScript, and production build: passed.
 - Production browser checks: **2 passed**, including the complete existing correction/confirmation/training journey and visitor isolation. The live-mode test is intentionally skipped in public mode.
 - Docker CMD expands a custom `PORT` correctly and explicitly uses one worker.
